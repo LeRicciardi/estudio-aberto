@@ -21,7 +21,7 @@ Abra o endereço que aparecer (por padrão `http://localhost:5173`). Use fone de
 npm test
 ```
 
-Roda os testes do motor sem navegador: tune, limitador, medidor LUFS e medição de atraso.
+Roda os testes do motor sem navegador: tune, limitador, medidor LUFS, medição de atraso e análise de BPM e tom.
 
 ```bash
 npm run publicar
@@ -41,7 +41,10 @@ Gera o build e publica no GitHub Pages (ramo `gh-pages`).
 | Master | Compressor de cola, ganho, limitador de pico real e medidor LUFS |
 | Exportação | WAV (16 bits, 44,1 kHz), MP3, só vozes, só beat |
 | Projeto | Salvamento automático no navegador, desfazer/refazer, arquivo único com projeto e áudio |
-| Tela | Modo simples (só o caminho principal) e modo completo |
+| Tela simples | Uma etapa por vez (Estilo, Beat, Gravar, Voz, Exportar), estilos em cartões com prévia, controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco) |
+| Ajuda automática | Sugestão de BPM e tom do beat importado, aviso de voz estourada ou baixa, conferência do equilíbrio entre voz e beat, comparação com e sem efeitos |
+| Gravação | Contagem de 4, medidor do microfone, escolha do microfone, regravar um trecho, forma de onda de cada take |
+| Computador | Atalhos de teclado, pintar a grade arrastando o mouse, arrastar arquivos para a janela, duas colunas em telas largas |
 | Aplicativo | Instalável no celular e no computador (PWA), abre sem internet |
 
 ## Como o código está organizado
@@ -61,6 +64,7 @@ src/
     limiter.ts          Limitador de pico com antecipação
     loudness.ts         Medidor LUFS (ITU-R BS.1770)
     latencia.ts         Medição do atraso de gravação
+    analise.ts          BPM e tom de um beat, nível de uma gravação
     recorder.ts         Captura do microfone
     engine.ts           Reprodução ao vivo e exportação
   storage.ts            Salvamento local e arquivo de projeto
@@ -81,7 +85,23 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 - **Ensinar enquanto produz.** Todo recurso explica o que faz.
 - **Leve.** Roda no navegador, sem instalação, pensado para notebook simples e celular.
 
+## Atalhos do teclado
+
+| Tecla | Ação |
+|---|---|
+| Espaço | Tocar / parar |
+| R | Gravar / parar gravação |
+| Ctrl/⌘ + Z, Ctrl/⌘ + Shift + Z | Desfazer, refazer |
+| Ctrl/⌘ + S | Salvar projeto em arquivo |
+| Ctrl/⌘ + E | Exportar música (WAV) |
+| ← → | Voltar / avançar 5 segundos |
+| Home | Voltar ao início |
+| 1 a 5 | Ir para a etapa (tela simples) |
+
 ## Limites atuais
+
+- A sugestão de BPM e tom do beat é uma estimativa: foi testada com sinais sintéticos, não com um conjunto de beats reais. O BPM pode sair na metade ou no dobro, e por isso as duas opções são oferecidas.
+- Não há suporte a teclado MIDI nem a plugins (VST, CLAP).
 
 - O tune é aplicado depois da gravação, não ao vivo durante o canto. É uma escolha: no navegador, efeito ao vivo aumenta o atraso.
 - Os modelos de funk, mandelão e bruxaria são aproximações e precisam ser corrigidos por quem é da cena.

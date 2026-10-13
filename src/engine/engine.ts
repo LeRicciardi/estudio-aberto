@@ -172,13 +172,13 @@ export class Engine {
    * Toca a música a partir de `desde`. Com `padraoEmLoop`, repete só aquele
    * padrão, sem vozes: é o modo de criação do beat.
    */
-  async tocar(p: Project, desde: number, padraoEmLoop?: number) {
+  async tocar(p: Project, desde: number, padraoEmLoop?: number, espera = 0) {
     this.parar();
     await this.ctx.resume();
     this.projeto = p;
     this.padraoEmLoop = padraoEmLoop;
     this.mixer.sincronizar(p);
-    this.t0 = this.ctx.currentTime + 0.06;
+    this.t0 = this.ctx.currentTime + 0.06 + espera;
     this.desde = desde;
     if (padraoEmLoop !== undefined) {
       this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, Infinity);
@@ -187,6 +187,26 @@ export class Engine {
       if (p.beat.fonte === 'padrao') this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, compassosDoArranjo(p) * STEPS);
     }
     this.tocando = true;
+  }
+
+  /**
+   * Contagem antes de gravar: quatro estalos no andamento da música. Devolve
+   * quanto tempo esperar (um compasso) para passar a `tocar` como `espera`.
+   */
+  contar(bpm: number): number {
+    const batida = 60 / bpm;
+    for (let k = 0; k < 4; k++) {
+      const t = this.ctx.currentTime + 0.06 + k * batida;
+      const o = this.ctx.createOscillator();
+      o.frequency.value = k === 0 ? 1600 : 1100;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.35, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      o.connect(g).connect(this.ctx.destination);
+      o.start(t);
+      o.stop(t + 0.06);
+    }
+    return 4 * batida;
   }
 
   parar() {

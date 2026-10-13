@@ -3,10 +3,11 @@
 
 import { Engine, exportarMix, paraMp3, paraWav, type Partes } from './engine/engine.ts';
 import { PRESETS_MASTER } from './engine/mixer.ts';
-import { Gravador, medirLatencia } from './engine/recorder.ts';
+import { avisoDeNivel } from './engine/analise.ts';
+import { Gravador, listarMicrofones, medirLatencia } from './engine/recorder.ts';
 import { INSTRUMENTOS, KITS } from './engine/synths.ts';
 import { duracaoDoPasso } from './engine/tempo.ts';
-import { afinarEmSegundoPlano } from './engine/tuneClient.ts';
+import { afinarEmSegundoPlano, analisarEmSegundoPlano, type AnaliseDoBeat } from './engine/tuneClient.ts';
 import { PRESETS_VOZ, TAMANHOS_DE_REVERB } from './engine/vocalChain.ts';
 import { GENEROS, aplicarGenero, novoProjeto } from './model/generos.ts';
 import {
@@ -29,6 +30,33 @@ let padraoAtual = 0;
 let modo: 'padrao' | 'musica' = 'padrao';
 /** Pincel da grade de bateria: o valor que um clique escreve no passo. */
 let pincel = 1;
+/** Gênero em pré-escuta na tela de estilo, se houver. */
+let previa: string | null = null;
+/** Comparação "antes e depois": toca as vozes sem nenhum tratamento. */
+let semEfeitos = false;
+/** Take que está sendo regravado, se a gravação atual é uma regravação. */
+let regravando: Take | undefined;
+/** Avisos de nível de cada take (voz estourada, voz baixa), por id do take. */
+const avisosDeTake = new Map<string, string>();
+/** Preferências deste aparelho (não fazem parte da música). */
+const prefs = {
+  contagem: localStorage.getItem('estudio-aberto:contagem') !== 'nao',
+  microfone: localStorage.getItem('estudio-aberto:microfone') ?? '',
+};
+
+/**
+ * O projeto como deve soar agora. Na comparação "sem efeitos", as vozes
+ * perdem timbre, tune, reverb, delay e distorção; o resto é o mesmo.
+ */
+function projetoParaTocar(): Project {
+  if (!semEfeitos) return projeto;
+  return {
+    ...projeto,
+    takes: projeto.takes.map((t) => ({
+      ...t, preset: 'cru', reverb: 0, delay: 0, distorcao: 0, telefone: false, altura: 0, tune: { ...t.tune, ligado: false },
+    })),
+  };
+}
 
 // ---------- utilidades de interface ----------
 
@@ -67,7 +95,7 @@ function registrar() {
  * "Desfazer"; com `agrupar` (arrastar um controle), só o valor final conta.
  */
 function mudou(agrupar = false) {
-  engine.mixer.sincronizar(projeto);
+  engine.mixer.sincronizar(projetoParaTocar());
   if (!agrupar) return registrar();
   window.clearTimeout(pendente);
   pendente = window.setTimeout(registrar, 300);
@@ -82,7 +110,7 @@ function navegarHistorico(passos: number) {
   projeto = JSON.parse(historico[indice]) as Project;
   salvarProjeto(projeto);
   padraoAtual = Math.min(padraoAtual, projeto.padroes.length - 1);
-  engine.mixer.sincronizar(projeto);
+  engine.mixer.sincronizar(projetoParaTocar());
   desenharTudo();
   void reafinarTodos();
   reiniciarSeTocando();
@@ -102,11 +130,19 @@ function av<T extends HTMLElement>(el: T): T {
   return el;
 }
 
+/** Marca um elemento como exclusivo do modo simples. */
+function so<T extends HTMLElement>(el: T): T {
+  el.classList.add('so-simples');
+  return el;
+}
+
 function trocarTela() {
   telaSimples = !telaSimples;
   localStorage.setItem(CHAVE_DO_MODO, telaSimples ? 'simples' : 'completa');
   document.body.classList.toggle('simples', telaSimples);
+  if (engine.tocando && !gravando) parar();
   desenharTransporte();
+  desenharTrilha();
 }
 
 // ---------- controles reutilizáveis ----------
@@ -172,11 +208,55 @@ const barraDeAcoes = h('div', { className: 'linha acoes' });
 const secEstilo = h('section');
 const secBeat = h('section');
 const secVozes = h('section');
+const secGravar = h('section');
 const secMaster = h('section');
+const trilha = so(h('nav', { className: 'trilha', ariaLabel: 'Etapas' }));
+const rodape = so(h('div', { className: 'linha rodape' }));
+const contagemEl = h('div', { className: 'contagem' });
+const medidorDeEntrada = h('div', { className: 'medidor' }, h('div'));
+
+// No modo simples aparece uma etapa por vez, nesta ordem.
+const ETAPAS = [
+  { nome: 'Estilo', secao: secEstilo },
+  { nome: 'Beat', secao: secBeat },
+  { nome: 'Gravar', secao: secGravar },
+  { nome: 'Voz', secao: secVozes },
+  { nome: 'Exportar', secao: secMaster },
+];
+let etapa = Math.min(ETAPAS.length - 1, Number(sessionStorage.getItem('estudio-aberto:etapa')) || 0);
+if (telaSimples && etapa >= 2) modo = 'musica';
+
+function irParaEtapa(i: number) {
+  const tocava = engine.tocando && !gravando;
+  if (tocava) parar();
+  etapa = Math.max(0, Math.min(ETAPAS.length - 1, i));
+  sessionStorage.setItem('estudio-aberto:etapa', String(etapa));
+  // Nas etapas de beat, tocar repete o padrão; nas de voz, toca a música com as vozes.
+  if (telaSimples) {
+    modo = etapa < 2 ? 'padrao' : 'musica';
+    desenharTransporte();
+  }
+  desenharTrilha();
+  if (telaSimples) window.scrollTo({ top: 0 });
+}
+
+function desenharTrilha() {
+  ETAPAS.forEach((e, i) => e.secao.classList.toggle('ativa', i === etapa));
+  trilha.replaceChildren(...ETAPAS.map((e, i) => botao(`${i + 1}. ${e.nome}`, () => irParaEtapa(i), i === etapa ? 'ativo' : '')));
+  const voltar = botao('← Voltar', () => irParaEtapa(etapa - 1));
+  voltar.disabled = etapa === 0;
+  const proxima = ETAPAS[etapa + 1];
+  rodape.replaceChildren(voltar, proxima ? botao(`Avançar: ${proxima.nome} →`, () => irParaEtapa(etapa + 1), 'principal') : h('span'));
+}
 
 app.append(
   h('header', {}, h('h1', {}, 'Estúdio Aberto'), h('p', {}, 'Crie o beat, grave a voz, mixe e exporte. Tudo no navegador.')),
-  secTransporte, barraDeAcoes, aviso, secEstilo, secBeat, secVozes, secMaster,
+  secTransporte, barraDeAcoes, aviso, trilha,
+  h('div', { className: 'colunas' },
+    h('div', { className: 'coluna' }, secEstilo, secBeat),
+    h('div', { className: 'coluna' }, secGravar, secVozes, secMaster),
+  ),
+  rodape,
 );
 
 const avisar = (texto: string) => (aviso.textContent = texto);
@@ -190,7 +270,7 @@ function desenharTransporte() {
   );
   secTransporte.replaceChildren(h('div', { className: 'linha' }, botaoTocar, botaoGravar, tempo, barraDeTempo));
   barraDeAcoes.replaceChildren(
-    modos,
+    av(modos),
     botao(telaSimples ? 'Mostrar tudo' : 'Tela simples', trocarTela, telaSimples ? '' : 'ativo'),
     botao('Desfazer', () => navegarHistorico(-1)),
     botao('Refazer', () => navegarHistorico(1)),
@@ -210,88 +290,139 @@ function trocarModo(novo: 'padrao' | 'musica') {
 }
 
 async function tocar() {
-  if (modo === 'padrao' && projeto.beat.fonte === 'padrao') {
-    await engine.tocar(projeto, 0, padraoAtual);
+  if (emLoop()) {
+    await engine.tocar(projetoParaTocar(), 0, padraoAtual);
   } else {
     if (cursor >= duracaoDaMusica(projeto, engine.buffers) - 0.05) cursor = 0;
-    await engine.tocar(projeto, cursor);
+    await engine.tocar(projetoParaTocar(), cursor);
   }
   botaoTocar.textContent = '■ Parar';
 }
 
 function emLoop() {
-  return modo === 'padrao' && projeto.beat.fonte === 'padrao' && !gravando;
+  return (modo === 'padrao' || etapaDeBeat()) && projeto.beat.fonte === 'padrao' && !gravando;
+}
+
+/** No modo simples, as etapas de estilo e beat sempre repetem o padrão; as de voz tocam a música. */
+function etapaDeBeat() {
+  return telaSimples && etapa < 2;
 }
 
 function reiniciarSeTocando() {
-  if (!engine.tocando || gravando) return;
-  if (emLoop()) void engine.tocar(projeto, engine.posicao() % (duracaoDoPasso(projeto.bpm) * STEPS), padraoAtual);
-  else void engine.tocar(projeto, engine.posicao());
+  if (!engine.tocando || gravando || previa) return;
+  if (emLoop()) void engine.tocar(projetoParaTocar(), engine.posicao() % (duracaoDoPasso(projeto.bpm) * STEPS), padraoAtual);
+  else void engine.tocar(projetoParaTocar(), engine.posicao());
 }
 
 function parar() {
-  cursor = emLoop() ? 0 : Math.min(engine.posicao(), duracaoDaMusica(projeto, engine.buffers));
+  cursor = emLoop() || previa ? 0 : Math.min(engine.posicao(), duracaoDaMusica(projeto, engine.buffers));
   engine.parar();
   engine.desde = cursor;
   botaoTocar.textContent = '▶ Tocar';
+  if (previa) {
+    previa = null;
+    engine.mixer.sincronizar(projetoParaTocar());
+    desenharEstilo();
+  }
 }
 
-botaoTocar.onclick = () => {
+function alternarTocar() {
   if (gravando) return;
   if (engine.tocando) parar();
   else void tocar();
-};
+}
+botaoTocar.onclick = alternarTocar;
 
-barraDeTempo.oninput = () => {
-  cursor = Number(barraDeTempo.value);
-  if (engine.tocando && !gravando) void engine.tocar(projeto, cursor);
+barraDeTempo.oninput = () => irPara(Number(barraDeTempo.value));
+
+/** Leva o cursor a um ponto da música e, se estiver tocando, continua de lá. */
+function irPara(segundos: number) {
+  cursor = Math.max(0, segundos);
+  if (engine.tocando && !gravando) void engine.tocar(projetoParaTocar(), cursor);
   else engine.desde = cursor;
-};
+}
 
-botaoGravar.onclick = async () => {
+function marcarGravacao(ligada: boolean) {
+  gravando = ligada;
+  for (const b of [botaoGravar, botaoGravarGrande]) {
+    b.textContent = ligada ? '■ Parar gravação' : '● Gravar voz';
+    b.classList.toggle('ativo', ligada);
+  }
+}
+
+/** Começa ou termina uma gravação. Com `refazer`, grava de novo o trecho daquele take. */
+async function alternarGravacao(refazer?: Take) {
   if (gravando) return terminarGravacao();
-  if (modo === 'padrao') trocarModo('musica');
+  parar();
+  if (modo === 'padrao') {
+    modo = 'musica';
+    desenharTransporte();
+  }
+  if (refazer) cursor = Math.max(0, refazer.inicio);
   try {
-    engine.parar();
     await engine.ctx.resume();
-    await gravador.iniciar();
+    await gravador.iniciar(prefs.microfone || undefined);
   } catch {
     avisar('Não consegui acessar o microfone. Libere a permissão no navegador e tente de novo.');
     return;
   }
-  gravando = true;
-  botaoGravar.textContent = '■ Parar gravação';
-  botaoGravar.classList.add('ativo');
+  regravando = refazer;
+  marcarGravacao(true);
   avisar('Gravando. Use fone de ouvido, senão o beat vaza para o microfone.');
-  await engine.tocar(projeto, cursor);
-};
+  // Contagem: um compasso de estalos para a pessoa entrar no tempo.
+  const espera = prefs.contagem ? engine.contar(projeto.bpm) : 0;
+  await engine.tocar(projetoParaTocar(), cursor, undefined, espera);
+  void desenharGravar();
+}
+botaoGravar.onclick = () => void alternarGravacao();
+const botaoGravarGrande = h('button', { className: 'gravar grande', onclick: () => void alternarGravacao() }, '● Gravar voz');
 
 async function terminarGravacao() {
   const g = gravador.parar();
   const { t0, desde } = engine;
-  gravando = false;
-  botaoGravar.textContent = '● Gravar voz';
-  botaoGravar.classList.remove('ativo');
-  parar();
+  const antigo = regravando;
+  regravando = undefined;
+  marcarGravacao(false);
+  engine.parar();
+  botaoTocar.textContent = '▶ Tocar';
   cursor = desde;
   engine.desde = desde;
-  if (g.amostras.length < g.taxa * 0.2) return avisar('Gravação curta demais, nada foi salvo.');
 
   // O som que você ouviu saiu atrasado da placa, e sua voz chegou atrasada
   // pelo microfone. Descontar esse atraso alinha o take com o beat.
   const latencia = (projeto.latenciaMs ?? latenciaEstimada()) / 1000;
-  const take = novoTake(id(), `Take ${projeto.takes.length + 1}`, id(), desde + (g.inicio - t0) - latencia, projeto.voz);
+  let inicio = desde + (g.inicio - t0) - latencia;
+  let amostras = g.amostras;
+  // Descarta o que foi captado durante a contagem, deixando um respiro de 1/4 de segundo.
+  const sobra = desde - 0.25 - inicio;
+  if (sobra > 0) {
+    const corte = Math.min(amostras.length, Math.round(sobra * g.taxa));
+    amostras = amostras.slice(corte);
+    inicio += corte / g.taxa;
+  }
+  if (amostras.length < g.taxa * 0.3) {
+    void desenharGravar();
+    return avisar('Gravação curta demais, nada foi salvo.');
+  }
+
+  const take = novoTake(id(), `Take ${projeto.takes.length + 1}`, id(), inicio, projeto.voz);
   take.reverb = PRESETS_VOZ[take.preset].reverb;
   take.delay = PRESETS_VOZ[take.preset].delay;
-  const buffer = engine.ctx.createBuffer(1, g.amostras.length, g.taxa);
-  buffer.copyToChannel(g.amostras, 0);
+  const buffer = engine.ctx.createBuffer(1, amostras.length, g.taxa);
+  buffer.copyToChannel(amostras, 0);
   engine.buffers.set(take.audioId, buffer);
   take.naMontagem = projeto.montagem.ligada;
+  if (antigo) antigo.mudo = true;
   projeto.takes.push(take);
+  const nivel = avisoDeNivel(amostras);
+  if (nivel) avisosDeTake.set(take.id, nivel);
   mudou();
   desenharVozes();
-  avisar(`${take.nome} gravado. Se a voz estiver fora do tempo, ajuste "Início" no take.`);
-  await guardarAudio(take.audioId, { tipo: 'pcm', taxa: g.taxa, amostras: g.amostras });
+  void desenharGravar();
+  avisar(nivel ?? (antigo
+    ? `${take.nome} gravado. O take anterior (${antigo.nome}) ficou mudo; em "Voz" dá para juntar o melhor dos dois.`
+    : `${take.nome} gravado. Ouça e, se a voz estiver fora do tempo, use "Medir atraso deste aparelho".`));
+  await guardarAudio(take.audioId, { tipo: 'pcm', taxa: g.taxa, amostras });
   // Pede ao navegador para não apagar o áudio guardado quando faltar espaço.
   void navigator.storage?.persist?.();
   void reafinar(take);
@@ -304,6 +435,41 @@ function latenciaEstimada(): number {
 
 // ---------- estilo ----------
 
+function cartaoDeGenero(g: string): HTMLElement {
+  const m = GENEROS[g];
+  const atual = projeto.genero === g;
+  return h('article', { className: 'cartao' + (atual ? ' atual' : '') + (previa === g ? ' tocando' : '') },
+    h('strong', {}, m.nome),
+    h('span', { className: 'nota' }, `${m.bpm} BPM`),
+    h('p', {}, m.descricao),
+    h('div', { className: 'linha' },
+      botao(previa === g ? '■ Parar' : '▶ Ouvir', () => void ouvirGenero(g)),
+      atual
+        ? h('span', { className: 'nota' }, 'Em uso')
+        : botao('Usar este', () => {
+            if (!confirm(`Usar ${m.nome}? O beat atual é substituído pelo modelo do estilo (dá para desfazer). As vozes ficam.`)) return;
+            parar();
+            aplicarGenero(projeto, g);
+            padraoAtual = 0;
+            mudou();
+            desenharTudo();
+          }, 'principal'),
+    ),
+  );
+}
+
+/** Pré-escuta: toca o modelo do estilo sem mexer na música da pessoa. */
+async function ouvirGenero(g: string) {
+  if (gravando) return;
+  const jaTocava = previa === g;
+  parar();
+  if (jaTocava) return;
+  previa = g;
+  await engine.tocar({ ...novoProjeto(g), tom: projeto.tom }, 0, 0);
+  botaoTocar.textContent = '■ Parar';
+  desenharEstilo();
+}
+
 function desenharEstilo() {
   const nome = h('input', { type: 'text', value: projeto.nome });
   nome.onchange = () => {
@@ -313,17 +479,9 @@ function desenharEstilo() {
   const genero = GENEROS[projeto.genero];
   secEstilo.replaceChildren(
     h('h2', {}, '1. Estilo'),
-    h('div', { className: 'linha' },
-      campo('Nome da música', nome),
-      seletor('Gênero', opcoes(GENEROS, (k) => GENEROS[k].nome), projeto.genero, (v) => {
-        if (!confirm(`Trocar para ${GENEROS[v].nome}? O beat atual é substituído pelo modelo do gênero (dá para desfazer). As vozes ficam.`)) return desenharEstilo();
-        aplicarGenero(projeto, v);
-        padraoAtual = 0;
-        desenharTudo();
-        reiniciarSeTocando();
-      }),
-    ),
-    h('p', { className: 'nota' }, genero ? genero.descricao : ''),
+    campo('Nome da música', nome),
+    h('p', { className: 'nota' }, 'Ouça os estilos e escolha um ponto de partida. Dá para mudar tudo depois.'),
+    h('div', { className: 'cartoes' }, ...Object.keys(GENEROS).map(cartaoDeGenero)),
     genero?.aproximado
       ? h('p', { className: 'nota alerta' }, 'Este modelo é uma aproximação: não achei uma transcrição confiável do ritmo. Ajuste a grade de ouvido, com uma faixa de referência.')
       : '',
@@ -348,6 +506,41 @@ let colunas: HTMLElement[][] = [];
 
 const ROTULO_DO_PASSO = ['', '', '2', '3', '4', ''];
 
+/**
+ * Pintar arrastando o mouse: o quadrado onde o botão desceu define o valor
+ * (ligar, apagar, rolo...) e todos os quadrados por onde o mouse passar na
+ * mesma grade recebem esse valor. Um clique simples continua alternando.
+ */
+let pintura: { grade: HTMLElement; valor: number; definirOrigem: (v: number) => void; usada: boolean } | null = null;
+let ignorarClique = false;
+
+window.addEventListener('pointerup', () => {
+  if (pintura?.usada) {
+    mudou();
+    // O clique que o navegador dispara ao soltar não deve desfazer a pintura.
+    ignorarClique = true;
+    setTimeout(() => (ignorarClique = false), 0);
+  }
+  pintura = null;
+});
+
+function pintavel(grade: HTMLElement, b: HTMLButtonElement, proximo: () => number, definir: (v: number) => void) {
+  b.onpointerdown = (e) => {
+    if (e.pointerType === 'mouse' && e.button === 0) pintura = { grade, valor: proximo(), definirOrigem: definir, usada: false };
+  };
+  b.onpointerenter = (e) => {
+    if (!pintura || pintura.grade !== grade || !(e.buttons & 1)) return;
+    if (!pintura.usada) pintura.definirOrigem(pintura.valor);
+    pintura.usada = true;
+    definir(pintura.valor);
+  };
+  b.onclick = () => {
+    if (ignorarClique) return;
+    definir(proximo());
+    mudou();
+  };
+}
+
 function gradeDeBateria(): HTMLElement {
   const padrao = projeto.padroes[padraoAtual];
   const grade = h('div', { className: 'grade' });
@@ -360,11 +553,10 @@ function gradeDeBateria(): HTMLElement {
         b.className = 'passo' + (v ? ' ligado' : '') + (v === 5 ? ' fraco' : '') + (i % 4 === 0 ? ' tempo-forte' : '');
         b.textContent = ROTULO_DO_PASSO[v];
       };
-      b.onclick = () => {
-        padrao.bateria[lane.id][i] = padrao.bateria[lane.id][i] === pincel ? 0 : pincel;
+      pintavel(grade, b, () => (padrao.bateria[lane.id][i] === pincel ? 0 : pincel), (v) => {
+        padrao.bateria[lane.id][i] = v;
         pintar();
-        mudou();
-      };
+      });
       pintar();
       colunas[i].push(b);
       grade.append(b);
@@ -374,7 +566,7 @@ function gradeDeBateria(): HTMLElement {
 }
 
 /** Grade de notas (808 ou melodia): linhas são notas da escala, agudas em cima. */
-function gradeDeNotas(ligado: (linha: number, passo: number) => boolean, alternar: (linha: number, passo: number) => void): HTMLElement {
+function gradeDeNotas(ligado: (linha: number, passo: number) => boolean, definir: (linha: number, passo: number, ligar: boolean) => void): HTMLElement {
   const grade = h('div', { className: 'grade notas' });
   const botoes: HTMLButtonElement[][] = [];
   const pintar = () => botoes.forEach((linha, l) => linha.forEach((b, s) => b.classList.toggle('ligado', ligado(l, s))));
@@ -384,11 +576,10 @@ function gradeDeNotas(ligado: (linha: number, passo: number) => boolean, alterna
     botoes[l] = [];
     for (let s = 0; s < STEPS; s++) {
       const b = h('button', { className: 'passo' + (s % 4 === 0 ? ' tempo-forte' : ''), ariaLabel: `${nota}, passo ${s + 1}` });
-      b.onclick = () => {
-        alternar(l, s);
+      pintavel(grade, b, () => (ligado(l, s) ? 0 : 1), (v) => {
+        definir(l, s, v === 1);
         pintar();
-        mudou();
-      };
+      });
       botoes[l][s] = b;
       colunas[s].push(b);
       grade.append(b);
@@ -426,7 +617,13 @@ function desenharBeat() {
       h('h2', {}, '2. Beat'), abas,
       campo('Arquivo de áudio (MP3, WAV...)', arquivo),
       h('p', { className: 'nota' }, beat.nomeArquivo ? `Beat atual: ${beat.nomeArquivo}` : 'Nenhum beat importado ainda.'),
-      h('p', { className: 'nota' }, 'Informe em "Estilo" o BPM e o tom do beat: o delay e o tune usam esses valores.'),
+      sugestaoDoBeat(),
+      h('div', { className: 'linha' },
+        numero('BPM do beat', 60, 200, projeto.bpm, (v) => { projeto.bpm = v; desenharEstilo(); }),
+        seletor('Tom do beat', NOTAS.map((n, i) => [i, n] as [number, string]), projeto.tom, (v) => { projeto.tom = v; desenharEstilo(); void reafinarTodos(); }),
+        seletor<Escala>('Escala', [['menor', 'Menor'], ['maior', 'Maior']], projeto.escala, (v) => { projeto.escala = v; desenharEstilo(); void reafinarTodos(); }),
+      ),
+      h('p', { className: 'nota' }, 'O delay usa o BPM e o tune usa o tom. Com eles errados, o eco sai fora do tempo e a afinação puxa para notas erradas.'),
       volume,
       espaco,
       explicacao([
@@ -512,7 +709,10 @@ function desenharBeat() {
       h('div', { className: 'rolagem' },
         gradeDeNotas(
           (l, s) => padrao.baixo[s] === l,
-          (l, s) => { padrao.baixo[s] = padrao.baixo[s] === l ? -1 : l; },
+          (l, s, ligar) => {
+            if (ligar) padrao.baixo[s] = l;
+            else if (padrao.baixo[s] === l) padrao.baixo[s] = -1;
+          },
         ),
         linhaDeDeslize,
       ),
@@ -530,7 +730,7 @@ function desenharBeat() {
       h('div', { className: 'rolagem' },
         gradeDeNotas(
           (l, s) => padrao.melodia[l][s],
-          (l, s) => { padrao.melodia[l][s] = !padrao.melodia[l][s]; },
+          (l, s, ligar) => { padrao.melodia[l][s] = ligar; },
         ),
       ),
       explicacao([
@@ -696,17 +896,71 @@ function arranjo(): HTMLElement {
   return lista;
 }
 
+/** O que a análise automática achou do beat importado, até a pessoa aceitar ou dispensar. */
+let analise: AnaliseDoBeat | null = null;
+
+async function analisarBeat(buffer: AudioBuffer) {
+  analise = null;
+  // Um minuto e meio do meio da música basta e evita intros vazias.
+  const ini = Math.floor(Math.min(buffer.duration * 0.15, 20) * buffer.sampleRate);
+  const fim = Math.min(buffer.length, ini + 90 * buffer.sampleRate);
+  const mono = new Float32Array(fim - ini);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const canal = buffer.getChannelData(c);
+    for (let i = 0; i < mono.length; i++) mono[i] += canal[ini + i] / buffer.numberOfChannels;
+  }
+  analise = await analisarEmSegundoPlano(mono, buffer.sampleRate);
+  desenharBeat();
+}
+
+function sugestaoDoBeat(): HTMLElement | string {
+  if (!projeto.beat.audioId) return '';
+  if (!analise) return h('p', { className: 'nota' }, 'Analisando o beat para sugerir BPM e tom...');
+  const { bpm, tom } = analise;
+  const usarBpm = (v: number) => botao(`Usar ${v} BPM`, () => {
+    projeto.bpm = v;
+    mudou();
+    desenharEstilo();
+    desenharBeat();
+  }, projeto.bpm === v ? 'ativo' : '');
+  const linhas: (HTMLElement | string)[] = [];
+  if (bpm) {
+    linhas.push(h('p', {}, `Andamento: parece ser ${bpm.bpm} BPM. Se o beat for contado na metade ou no dobro, é ${bpm.alternativa}.`));
+    linhas.push(h('div', { className: 'linha' }, usarBpm(bpm.bpm), usarBpm(bpm.alternativa)));
+  }
+  if (tom) {
+    const nomeDoTom = `${NOTAS[tom.tom]} ${tom.escala}`;
+    const emUso = projeto.tom === tom.tom && projeto.escala === tom.escala;
+    linhas.push(h('p', {}, tom.confianca < 0.05
+      ? `Tom: meu melhor palpite é ${nomeDoTom}, mas com pouca certeza. Confira no nome do arquivo ou com quem fez o beat.`
+      : `Tom: parece ser ${nomeDoTom}.`));
+    linhas.push(botao(`Usar ${nomeDoTom}`, () => {
+      projeto.tom = tom.tom;
+      projeto.escala = tom.escala;
+      mudou();
+      desenharEstilo();
+      desenharBeat();
+      void reafinarTodos();
+    }, emUso ? 'ativo' : ''));
+  }
+  if (!bpm && !tom) linhas.push(h('p', {}, 'Não consegui identificar BPM nem tom neste arquivo. Informe os dois abaixo.'));
+  return h('div', { className: 'sugestao' }, h('strong', {}, 'Sugestão automática'), ...linhas,
+    h('p', { className: 'nota' }, 'É uma estimativa. Se o beat veio com BPM e tom no nome do arquivo, confie no nome.'));
+}
+
 async function importarBeat(arquivo: File) {
   try {
     avisar('Carregando beat...');
     const buffer = await engine.ctx.decodeAudioData(await arquivo.arrayBuffer());
     const audioId = id();
     engine.buffers.set(audioId, buffer);
+    projeto.beat.fonte = 'arquivo';
     projeto.beat.audioId = audioId;
     projeto.beat.nomeArquivo = arquivo.name;
     mudou();
     desenharBeat();
     avisar(`Beat carregado: ${relogio(buffer.duration)} de duração.`);
+    void analisarBeat(buffer);
     await guardarAudio(audioId, { tipo: 'arquivo', blob: arquivo });
   } catch {
     avisar('Não consegui ler esse arquivo de áudio.');
@@ -752,11 +1006,13 @@ function desenharTake(take: Take): HTMLElement {
     take.mudo = !take.mudo;
     mudou();
     desenharVozes();
+    void desenharGravar();
   }, take.mudo ? 'ativo' : '');
   const apagar = botao('Apagar', () => {
     projeto.takes = projeto.takes.filter((t) => t.id !== take.id);
     mudou();
     desenharVozes();
+    void desenharGravar();
     reiniciarSeTocando();
     avisar(`${take.nome} apagado. Use "Desfazer" se foi engano.`);
   }, 'perigo');
@@ -775,8 +1031,33 @@ function desenharTake(take: Take): HTMLElement {
   const refazerTune = () => void reafinar(take);
   const sinal = (v: number) => (v > 0 ? `+${v}` : String(v));
 
+  // Controles por intenção (modo simples): cada um move vários ajustes de uma vez.
+  const NIVEIS_DE_TUNE: [string, boolean, number, number][] = [
+    ['Sem tune', false, 0.2, 1], ['Leve', true, 0.6, 0.6], ['Forte', true, 0.25, 1], ['Robô', true, 0, 1],
+  ];
+  const tuneAtual = !take.tune.ligado ? 0 : take.tune.velocidade <= 0.05 ? 3 : take.tune.intensidade < 0.8 ? 1 : 2;
+  const niveisDeTune = h('div', { className: 'abas' }, ...NIVEIS_DE_TUNE.map(([rotulo, ligado, velocidade, intensidade], i) =>
+    botao(rotulo, () => {
+      take.tune = { ligado, velocidade, intensidade };
+      mudou();
+      desenharVozes();
+      void reafinar(take).then(reiniciarSeTocando);
+    }, i === tuneAtual ? 'ativo' : ''),
+  ));
+  const distancia = deslizante('Perto ↔ longe', 0, 1, 0.01, Math.min(1, Math.max(0, (take.reverb - 0.02) / 0.5)), (v) => {
+    take.reverb = 0.02 + v * 0.5;
+    take.tamanhoReverb = v < 0.34 ? 'quarto' : v < 0.67 ? 'sala' : 'salao';
+  });
+  const eco = deslizante('Seca ↔ com eco', 0, 1, 0.01, Math.min(1, take.delay / 0.5), (v) => {
+    take.delay = v * 0.5;
+    take.repeticoes = 0.2 + v * 0.4;
+  });
+
   return h('article', { className: 'take' },
     h('div', { className: 'linha' }, nome, mudo, apagar),
+    onda(take),
+    so(campo('Afinação', niveisDeTune)),
+    so(h('div', { className: 'linha' }, distancia, eco)),
     h('div', { className: 'linha' },
       deslizante('Volume', 0, 1.5, 0.01, take.volume, (v) => { take.volume = v; }),
       av(deslizante('Lado (esq. / dir.)', -1, 1, 0.05, take.pan, (v) => { take.pan = v; })),
@@ -790,40 +1071,43 @@ function desenharTake(take: Take): HTMLElement {
     }),
     explicacao(PRESETS_VOZ[take.preset].explicacao),
 
-    h('h4', {}, 'Afinação'),
-    h('div', { className: 'linha' },
+    av(h('h4', {}, 'Afinação')),
+    av(h('div', { className: 'linha' },
       h('label', { className: 'caixa' }, tune, 'Tune'),
       deslizante('Robótico ↔ natural', 0, 1, 0.05, take.tune.velocidade, (v) => { take.tune.velocidade = v; }, refazerTune),
-      av(deslizante('Quanto corrige', 0, 1, 0.05, take.tune.intensidade, (v) => { take.tune.intensidade = v; }, refazerTune)),
-    ),
+      deslizante('Quanto corrige', 0, 1, 0.05, take.tune.intensidade, (v) => { take.tune.intensidade = v; }, refazerTune),
+    )),
     av(deslizante(`Altura da voz: ${sinal(take.altura)} semitons (grossa ↔ fina)`, -12, 12, 1, take.altura, (v) => { take.altura = v; }, () => {
       refazerTune();
       desenharVozes();
     })),
-    explicacao([
+    av(explicacao([
       'Tune: puxa cada nota cantada para a nota mais próxima da escala da música (definida em "Estilo").',
       'Robótico pula direto para a nota: é o efeito marcante do trap e do plug. Natural desliza até ela e quase não se percebe.',
       '"Quanto corrige" em 100% leva a voz até a nota exata; valores menores só aproximam, preservando o jeito de cantar.',
       'Altura sobe ou desce a voz inteira sem mudar a velocidade: +12 é uma oitava acima (fina), -12 uma abaixo (grossa). Funciona mesmo com o tune desligado.',
-    ]),
+    ])),
 
-    h('h4', {}, 'Reverb (espaço)'),
-    h('div', { className: 'linha' },
+    av(h('h4', {}, 'Reverb (espaço)')),
+    av(h('div', { className: 'linha' },
       deslizante('Quantidade', 0, 0.8, 0.01, take.reverb, (v) => { take.reverb = v; }),
-      av(seletor<TamanhoReverb>('Tamanho', opcoes(TAMANHOS_DE_REVERB, (k) => TAMANHOS_DE_REVERB[k].nome), take.tamanhoReverb, (v) => { take.tamanhoReverb = v; })),
-    ),
-    h('h4', {}, 'Delay (eco)'),
-    h('div', { className: 'linha' },
+      seletor<TamanhoReverb>('Tamanho', opcoes(TAMANHOS_DE_REVERB, (k) => TAMANHOS_DE_REVERB[k].nome), take.tamanhoReverb, (v) => { take.tamanhoReverb = v; }),
+    )),
+    av(h('h4', {}, 'Delay (eco)')),
+    av(h('div', { className: 'linha' },
       deslizante('Quantidade', 0, 0.8, 0.01, take.delay, (v) => { take.delay = v; }),
-      av(seletor<DivisaoDelay>('Tempo', [[4, '1 batida'], [8, '1/2 batida'], [16, '1/4 de batida']], take.divisaoDelay, (v) => { take.divisaoDelay = v; })),
-      av(deslizante('Repetições', 0, 0.75, 0.01, take.repeticoes, (v) => { take.repeticoes = v; })),
-    ),
+      seletor<DivisaoDelay>('Tempo', [[4, '1 batida'], [8, '1/2 batida'], [16, '1/4 de batida']], take.divisaoDelay, (v) => { take.divisaoDelay = v; }),
+      deslizante('Repetições', 0, 0.75, 0.01, take.repeticoes, (v) => { take.repeticoes = v; }),
+    )),
     av(h('h4', {}, 'Caráter')),
     av(h('div', { className: 'linha' },
       deslizante('Distorção', 0, 1, 0.05, take.distorcao, (v) => { take.distorcao = v; }),
       h('label', { className: 'caixa' }, telefone, 'Voz de telefone'),
     )),
     explicacao([
+      'Afinação: "Leve" só aproxima das notas certas; "Forte" corrige tudo sem soar artificial; "Robô" é o efeito marcante do trap e do plug.',
+      'Perto ↔ longe controla o reverb, que simula um ambiente: pouco deixa a voz próxima, muito deixa distante e grandiosa. Em excesso, embola a letra.',
+      'Seca ↔ com eco controla o delay, que repete a voz no tempo do beat.',
       'Reverb simula o som de um ambiente. Quarto deixa a voz próxima; salão deixa distante e grandiosa. Em excesso, embola a letra.',
       'Delay repete a voz em eco, no tempo do beat. "Repetições" define quantas vezes o eco volta antes de sumir.',
       'Distorção deixa a voz áspera e agressiva, como no hard e no trash. Voz de telefone corta graves e agudos, um efeito comum em intros e respostas.',
@@ -886,7 +1170,7 @@ function montagem(): HTMLElement {
     grade.append(botao(String(i * m.compassos + 1), () => {
       cursor = i * duracaoDoTrecho(projeto);
       if (modo === 'padrao') trocarModo('musica');
-      if (engine.tocando && !gravando) void engine.tocar(projeto, cursor);
+      if (engine.tocando && !gravando) void engine.tocar(projetoParaTocar(), cursor);
       else engine.desde = cursor;
     }, 'passo cabeca'));
   }
@@ -928,19 +1212,131 @@ function montagem(): HTMLElement {
   );
 }
 
+/** Forma de onda do take ao longo da música, com a agulha de reprodução. Clicar leva a música àquele ponto. */
+let agulhas: HTMLElement[] = [];
+
+function onda(take: Take): HTMLElement {
+  const buffer = engine.buffers.get(take.audioId);
+  const duracao = duracaoDaMusica(projeto, engine.buffers);
+  const tela = h('canvas', { width: 900, height: 48 });
+  const g = tela.getContext('2d');
+  if (buffer && g) {
+    const dados = buffer.getChannelData(0);
+    g.fillStyle = take.mudo ? '#5b6570' : '#f5b83d';
+    for (let x = 0; x < tela.width; x++) {
+      // Cada coluna mostra o pico do trecho de áudio que cai nela.
+      const a = Math.floor((((x / tela.width) * duracao - take.inicio) * buffer.sampleRate));
+      const b = Math.floor(((((x + 1) / tela.width) * duracao - take.inicio) * buffer.sampleRate));
+      if (b <= 0 || a >= dados.length) continue;
+      let pico = 0;
+      for (let i = Math.max(0, a); i < Math.min(dados.length, b); i += 8) pico = Math.max(pico, Math.abs(dados[i]));
+      const altura = Math.max(1, pico * tela.height);
+      g.fillRect(x, (tela.height - altura) / 2, 1, altura);
+    }
+  }
+  const agulha = h('div', { className: 'agulha' });
+  agulhas.push(agulha);
+  const caixa = h('div', { className: 'onda', title: 'Clique para ouvir a partir deste ponto' }, tela, agulha);
+  caixa.onclick = (e) => {
+    const r = caixa.getBoundingClientRect();
+    if (modo === 'padrao') trocarModo('musica');
+    irPara(((e.clientX - r.left) / r.width) * duracao);
+  };
+  return caixa;
+}
+
+/** Compara o volume das vozes com o do beat e diz, em linguagem comum, o que ajustar. */
+async function conferirEquilibrio() {
+  if (!projeto.takes.some((t) => !t.mudo)) return avisar('Grave uma voz antes de conferir o equilíbrio.');
+  avisar('Conferindo o equilíbrio entre voz e beat...');
+  const voz = (await exportarMix(projeto, engine.buffers, 'voz')).lufs;
+  const beat = (await exportarMix(projeto, engine.buffers, 'beat')).lufs;
+  if (!Number.isFinite(voz) || !Number.isFinite(beat)) return avisar('Não deu para comparar: falta voz ou beat.');
+  const diferenca = voz - beat;
+  avisar(
+    diferenca < -4 ? `A voz está ${Math.round(-diferenca)} dB abaixo do beat e vai sumir. Suba o volume da voz ou baixe o do beat.`
+    : diferenca > 6 ? `A voz está ${Math.round(diferenca)} dB acima do beat e soa descolada dele. Baixe um pouco a voz ou suba o beat.`
+    : 'Voz e beat estão equilibrados: a voz aparece sem se descolar do beat.',
+  );
+}
+
 function desenharVozes() {
+  agulhas = [];
+  const comparar = botao(semEfeitos ? 'Ouvindo SEM efeitos' : 'Comparar: ouvir sem efeitos', () => {
+    semEfeitos = !semEfeitos;
+    engine.mixer.sincronizar(projetoParaTocar());
+    reiniciarSeTocando();
+    desenharVozes();
+  }, semEfeitos ? 'ativo' : '');
+  comparar.title = 'Alterna entre a voz tratada e a voz crua, para ouvir o que os efeitos fazem';
+  secVozes.replaceChildren(
+    h('h2', {}, '4. Voz'),
+    projeto.takes.length === 0
+      ? h('p', { className: 'nota' }, 'Nenhum take ainda. Grave sua voz na etapa "Gravar" e volte aqui para ajustar o som dela.')
+      : h('div', { className: 'linha' }, comparar, botao('Conferir equilíbrio voz × beat', () => void conferirEquilibrio())),
+    ...projeto.takes.map(desenharTake),
+    ...(projeto.takes.length > 1 ? [av(h('h3', {}, 'Montagem: o melhor de cada take')), av(montagem())] : []),
+  );
+}
+
+// ---------- gravar ----------
+
+async function desenharGravar() {
+  const contagem = h('input', { type: 'checkbox', checked: prefs.contagem });
+  contagem.onchange = () => {
+    prefs.contagem = contagem.checked;
+    localStorage.setItem('estudio-aberto:contagem', prefs.contagem ? 'sim' : 'nao');
+  };
   const latencia = h('input', { type: 'number', min: '0', max: '500', placeholder: 'automático', value: projeto.latenciaMs === null ? '' : String(projeto.latenciaMs) });
   latencia.onchange = () => {
     projeto.latenciaMs = latencia.value === '' ? null : Math.max(0, Number(latencia.value));
     mudou();
   };
-  secVozes.replaceChildren(
-    h('h2', {}, '3. Vozes'),
-    projeto.takes.length === 0
-      ? h('p', { className: 'nota' }, 'Nenhum take ainda. Coloque o fone, toque em "Gravar voz" e cante em cima do beat. A gravação começa de onde a música estiver.')
-      : '',
-    ...projeto.takes.map(desenharTake),
-    ...(projeto.takes.length > 1 ? [av(h('h3', {}, 'Montagem: o melhor de cada take')), av(montagem())] : []),
+  // A lista de microfones só tem nomes depois que a pessoa deu permissão.
+  const microfones = await listarMicrofones().catch(() => []);
+  const escolha = microfones.length > 1
+    ? seletor('Microfone', [['', 'Padrão do sistema'] as [string, string], ...microfones.map((m) => [m.id, m.nome] as [string, string])], prefs.microfone, (v) => {
+        prefs.microfone = v;
+        localStorage.setItem('estudio-aberto:microfone', v);
+      })
+    : '';
+
+  const lista = projeto.takes.map((take) => {
+    const buffer = engine.buffers.get(take.audioId);
+    const alerta = avisosDeTake.get(take.id);
+    return h('article', { className: 'take' },
+      h('div', { className: 'linha' },
+        h('strong', {}, take.nome),
+        h('span', { className: 'nota' }, `${buffer ? relogio(buffer.duration) : '?'} · começa em ${relogio(Math.max(0, take.inicio))}${take.mudo ? ' · mudo' : ''}`),
+      ),
+      onda(take),
+      alerta ? h('p', { className: 'nota alerta' }, alerta) : '',
+      h('div', { className: 'linha' },
+        botao('▶ Ouvir', () => {
+          if (modo === 'padrao') trocarModo('musica');
+          cursor = Math.max(0, take.inicio);
+          engine.desde = cursor;
+          void tocar();
+        }),
+        botao('Gravar de novo este trecho', () => void alternarGravacao(take)),
+        botao('Apagar', () => {
+          projeto.takes = projeto.takes.filter((t) => t.id !== take.id);
+          mudou();
+          desenharVozes();
+          void desenharGravar();
+          avisar(`${take.nome} apagado. Use "Desfazer" se foi engano.`);
+        }, 'perigo'),
+      ),
+    );
+  });
+
+  secGravar.replaceChildren(
+    h('h2', {}, '3. Gravar'),
+    h('p', { className: 'nota' }, 'Coloque o fone (de preferência com fio), aperte gravar e cante em cima do beat. A gravação começa de onde a música estiver; cada gravação vira um take.'),
+    h('div', { className: 'linha palco' }, botaoGravarGrande, contagemEl),
+    campo('Nível do microfone', medidorDeEntrada),
+    h('div', { className: 'linha' }, h('label', { className: 'caixa' }, contagem, 'Contagem de 4 antes de gravar'), escolha),
+    ...lista,
     h('h3', {}, 'Voz fora do tempo?'),
     h('p', { className: 'nota' }, 'Todo aparelho atrasa o som um pouco. Fone Bluetooth atrasa muito e de forma irregular: prefira fone com fio para gravar.'),
     h('div', { className: 'linha' },
@@ -949,17 +1345,22 @@ function desenharVozes() {
         if (engine.tocando || gravando) return;
         avisar('Medindo: tire o fone, aumente o volume e fique em silêncio por 4 segundos.');
         try {
-          const atraso = await medirLatencia(engine.ctx, gravador);
+          const atraso = await medirLatencia(engine.ctx, gravador, prefs.microfone || undefined);
           if (atraso === null) return avisar('O microfone não ouviu os estalos. Tire o fone, aumente o volume e tente de novo.');
           projeto.latenciaMs = Math.round(atraso * 1000);
           mudou();
-          desenharVozes();
+          void desenharGravar();
           avisar(`Atraso medido: ${projeto.latenciaMs} ms. As próximas gravações já saem alinhadas.`);
         } catch {
           avisar('Não consegui acessar o microfone.');
         }
       }),
     ),
+    explicacao([
+      'Contagem: quatro estalos no andamento da música antes de o beat entrar, para você começar no tempo.',
+      'Nível do microfone: enquanto grava, a barra deve ficar no meio. Vermelha quer dizer que a voz está estourando.',
+      'Gravar de novo: regrava a partir do mesmo ponto. O take antigo fica mudo, não é apagado.',
+    ]),
   );
 }
 
@@ -985,24 +1386,10 @@ function desenharMaster() {
     }
   };
   const abrir = h('input', { type: 'file', accept: '.json,application/json' });
-  abrir.onchange = async () => {
-    const arquivo = abrir.files?.[0];
-    if (!arquivo) return;
-    try {
-      parar();
-      projeto = await desempacotarProjeto(await arquivo.text());
-      padraoAtual = 0;
-      mudou();
-      desenharTudo();
-      await restaurarAudio();
-      avisar(`Projeto "${projeto.nome}" aberto.`);
-    } catch {
-      avisar('Esse arquivo não é um projeto do Estúdio Aberto.');
-    }
-  };
+  abrir.onchange = () => abrir.files?.[0] && void abrirDeArquivo(abrir.files[0]);
 
   secMaster.replaceChildren(
-    h('h2', {}, '4. Master e exportação'),
+    h('h2', {}, '5. Master e exportação'),
     seletor<PresetMaster>('Acabamento', opcoes(PRESETS_MASTER, (k) => PRESETS_MASTER[k].nome), projeto.master, (v) => {
       projeto.master = v;
       desenharMaster();
@@ -1015,7 +1402,7 @@ function desenharMaster() {
     ]),
     campo('Nível de saída', medidor),
     h('div', { className: 'linha' },
-      botao('Exportar música (WAV)', () => void exportar('tudo', ''), 'principal'),
+      Object.assign(botao('Exportar música (WAV)', () => void exportar('tudo', ''), 'principal'), { id: 'exportar-wav' }),
       botao('MP3 para compartilhar', () => void exportar('tudo', '', true)),
       av(botao('Só as vozes', () => void exportar('voz', ' - vozes'))),
       av(botao('Só o beat', () => void exportar('beat', ' - beat'))),
@@ -1024,14 +1411,16 @@ function desenharMaster() {
     h('h3', {}, 'Projeto'),
     h('p', { className: 'nota' }, 'O projeto é salvo sozinho neste navegador. Salve em arquivo para guardar cópia, trocar de aparelho ou mandar para alguém gravar junto.'),
     h('div', { className: 'linha' },
-      botao('Salvar projeto em arquivo', async () => {
-        registrar();
-        baixar(await empacotarProjeto(projeto), `${projeto.nome || 'projeto'}.estudio.json`);
-      }),
+      botao('Salvar projeto em arquivo', () => void salvarEmArquivo()),
       campo('Abrir projeto de um arquivo', abrir),
     ),
     h('h3', {}, 'Aplicativo'),
     instalacao(),
+    h('details', { className: 'explica atalhos' },
+      h('summary', {}, 'Atalhos do teclado'),
+      h('ul', {}, ...ATALHOS.map(([tecla, acao]) => h('li', {}, h('kbd', {}, tecla), ` ${acao}`))),
+      h('p', {}, 'No computador também dá para pintar a grade arrastando o mouse e soltar um arquivo de áudio ou de projeto em qualquer lugar da janela.'),
+    ),
     botao('Começar música nova', () => {
       if (!confirm('Começar uma música nova? Dá para voltar com "Desfazer" enquanto a página estiver aberta.')) return;
       parar();
@@ -1089,18 +1478,29 @@ function quadro() {
   const duracao = duracaoDaMusica(projeto, engine.buffers);
   const pos = engine.posicao();
   const loop = emLoop();
-  if (engine.tocando && !gravando && !loop && pos >= duracao) {
+  if (engine.tocando && !gravando && !loop && !previa && pos >= duracao) {
     parar();
     cursor = 0;
     engine.desde = 0;
   }
   barraDeTempo.max = String(duracao);
   if (document.activeElement !== barraDeTempo || engine.tocando) barraDeTempo.value = String(Math.min(pos, duracao));
-  tempo.textContent = loop ? `Padrão: ${projeto.padroes[padraoAtual]?.nome ?? ''}` : `${relogio(pos)} / ${relogio(duracao)}`;
+  tempo.textContent = previa ? `Ouvindo: ${GENEROS[previa].nome}`
+    : loop ? `Padrão: ${projeto.padroes[padraoAtual]?.nome ?? ''}`
+    : `${relogio(pos)} / ${relogio(duracao)}`;
+  barraDeTempo.hidden = loop || !!previa;
+  for (const a of agulhas) a.style.left = `${Math.min(100, (pos / duracao) * 100)}%`;
+
+  // Contagem regressiva antes da gravação e nível do microfone durante ela.
+  const falta = gravando ? engine.t0 - engine.ctx.currentTime : 0;
+  contagemEl.textContent = falta > 0 ? String(Math.ceil(falta / (60 / projeto.bpm))) : gravando ? 'Gravando' : '';
+  const entrada = medidorDeEntrada.firstElementChild as HTMLElement;
+  entrada.style.width = `${Math.min(100, Math.sqrt(gravador.nivel) * 100)}%`;
+  entrada.classList.toggle('estourando', gravador.nivel > 0.97);
 
   // Acende a coluna que está tocando, se o padrão aberto for o que está soando.
   let passoAtual = -1;
-  if (engine.tocando && projeto.beat.fonte === 'padrao') {
+  if (engine.tocando && !previa && projeto.beat.fonte === 'padrao') {
     const passo = Math.floor(pos / duracaoDoPasso(projeto.bpm));
     const soando = loop ? projeto.padroes[padraoAtual] : padraoNoCompasso(projeto, Math.floor(passo / STEPS));
     if (soando === projeto.padroes[padraoAtual]) passoAtual = passo % STEPS;
@@ -1116,11 +1516,104 @@ function quadro() {
 
 function desenharTudo() {
   desenharTransporte();
+  desenharTrilha();
   desenharEstilo();
   desenharBeat();
   desenharVozes();
+  void desenharGravar();
   desenharMaster();
 }
+
+// ---------- computador: atalhos de teclado e arrastar arquivos ----------
+
+const ATALHOS: [string, string][] = [
+  ['Espaço', 'Tocar / parar'],
+  ['R', 'Gravar / parar gravação'],
+  ['Ctrl/⌘ + Z', 'Desfazer'],
+  ['Ctrl/⌘ + Shift + Z', 'Refazer'],
+  ['Ctrl/⌘ + S', 'Salvar projeto em arquivo'],
+  ['Ctrl/⌘ + E', 'Exportar música (WAV)'],
+  ['← →', 'Voltar / avançar 5 segundos'],
+  ['Home', 'Voltar ao início'],
+  ['1 a 5', 'Ir para a etapa (tela simples)'],
+];
+
+window.addEventListener('keydown', (e) => {
+  // Enquanto a pessoa digita em um campo, as teclas são do campo.
+  const alvo = e.target as HTMLElement;
+  const digitando = alvo.tagName === 'SELECT' || alvo.tagName === 'TEXTAREA'
+    || (alvo instanceof HTMLInputElement && !['range', 'checkbox', 'file'].includes(alvo.type));
+  const comando = e.ctrlKey || e.metaKey;
+  const tecla = e.key.toLowerCase();
+  if (comando && tecla === 'z') {
+    if (digitando) return;
+    e.preventDefault();
+    navegarHistorico(e.shiftKey ? 1 : -1);
+  } else if (comando && tecla === 's') {
+    e.preventDefault();
+    void salvarEmArquivo();
+  } else if (comando && tecla === 'e') {
+    e.preventDefault();
+    document.querySelector<HTMLButtonElement>('#exportar-wav')?.click();
+  } else if (digitando || comando || e.altKey) {
+    return;
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    alternarTocar();
+  } else if (tecla === 'r') {
+    void alternarGravacao();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (alvo instanceof HTMLInputElement) return;
+    irPara(engine.posicao() + (e.key === 'ArrowLeft' ? -5 : 5));
+  } else if (e.key === 'Home') {
+    irPara(0);
+  } else if (telaSimples && e.key >= '1' && e.key <= '5') {
+    irParaEtapa(Number(e.key) - 1);
+  }
+});
+
+// Com o foco em um botão, o navegador "clica" nele ao soltar a barra de
+// espaço. Aqui o espaço é sempre tocar/parar, então esse clique é cancelado.
+window.addEventListener('keyup', (e) => {
+  if (e.key === ' ' && (e.target as HTMLElement).tagName === 'BUTTON') e.preventDefault();
+});
+
+async function salvarEmArquivo() {
+  registrar();
+  baixar(await empacotarProjeto(projeto), `${projeto.nome || 'projeto'}.estudio.json`);
+}
+
+async function abrirDeArquivo(arquivo: File) {
+  try {
+    parar();
+    projeto = await desempacotarProjeto(await arquivo.text());
+    padraoAtual = 0;
+    mudou();
+    desenharTudo();
+    await restaurarAudio();
+    void desenharGravar();
+    desenharVozes();
+    avisar(`Projeto "${projeto.nome}" aberto.`);
+  } catch {
+    avisar('Esse arquivo não é um projeto do Estúdio Aberto.');
+  }
+}
+
+// Arrastar um arquivo para a janela: áudio vira o beat, .json abre o projeto.
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.body.classList.add('soltando');
+});
+window.addEventListener('dragleave', () => document.body.classList.remove('soltando'));
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('soltando');
+  const arquivo = e.dataTransfer?.files[0];
+  if (!arquivo) return;
+  if (arquivo.name.endsWith('.json')) void abrirDeArquivo(arquivo);
+  else if (arquivo.type.startsWith('audio/')) void importarBeat(arquivo).then(() => irParaEtapa(1));
+  else avisar('Solte um arquivo de áudio (para usar como beat) ou um projeto .estudio.json.');
+});
 
 async function restaurarAudio() {
   for (const audioId of idsDeAudio(projeto)) {
@@ -1138,7 +1631,10 @@ async function restaurarAudio() {
       engine.buffers.set(audioId, buffer);
     }
   }
-  if (projeto.montagem.ligada) desenharVozes();
+  desenharVozes();
+  void desenharGravar();
+  const beat = engine.buffers.get(projeto.beat.audioId ?? '');
+  if (beat && !analise) void analisarBeat(beat);
   await reafinarTodos();
 }
 
