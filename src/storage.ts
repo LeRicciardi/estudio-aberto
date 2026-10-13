@@ -101,7 +101,7 @@ export const abrirVersao = (v: Versao) => normalizar(JSON.parse(v.projeto) as Pr
 /** Áudio que não pode ser apagado: o do projeto aberto e o de todas as versões guardadas. */
 export async function audiosEmUso(p: Project): Promise<Set<string>> {
   const usados = new Set(idsDeAudio(p));
-  for (const chave of await listarAudios()) if (String(chave).startsWith(PREFIXO_DO_COFRE)) usados.add(String(chave));
+  for (const chave of await listarAudios()) if (String(chave).startsWith(PREFIXO_DO_COFRE) || String(chave).startsWith('biblioteca:')) usados.add(String(chave));
   for (const v of await listarVersoes()) {
     usados.add(v.chave);
     for (const audioId of idsDeAudio(abrirVersao(v))) usados.add(audioId);

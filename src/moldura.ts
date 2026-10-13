@@ -30,6 +30,8 @@ export const secCanais = pagina_('canais');
 
 export const secNotas = pagina_('notas');
 
+export const secSons = pagina_('sons');
+
 export const secArranjo = pagina_('arranjo');
 
 export const secLetra = pagina_('letra');
@@ -60,6 +62,7 @@ export const PAGINAS = [
   { id: 'estilo', nome: 'Estilo', secao: secEstilo, simples: true },
   { id: 'canais', nome: 'Beat', secao: secCanais, simples: true },
   { id: 'notas', nome: 'Notas', secao: secNotas, simples: false },
+  { id: 'sons', nome: 'Sons', secao: secSons, simples: true },
   { id: 'arranjo', nome: 'Arranjo', secao: secArranjo, simples: false },
   { id: 'letra', nome: 'Letra', secao: secLetra, simples: true },
   { id: 'gravar', nome: 'Gravar', secao: secGravar, simples: true },
@@ -80,7 +83,7 @@ if (estado.telaSimples && !etapaDeBeat()) estado.modo = 'musica';
 
 /** Nas páginas de criação do beat, tocar repete o padrão; nas demais, toca a música com as vozes. */
 export function etapaDeBeat() {
-  return estado.pagina === 'estilo' || estado.pagina === 'canais' || estado.pagina === 'notas';
+  return estado.pagina === 'estilo' || estado.pagina === 'canais' || estado.pagina === 'notas' || estado.pagina === 'sons';
 }
 
 app.append(secTransporte, trilha, aviso, h('main', {}, ...PAGINAS.map((p) => p.secao)), rodape);

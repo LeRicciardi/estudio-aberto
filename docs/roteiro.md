@@ -98,9 +98,9 @@ Levantamento do que FL Studio, FL Studio Mobile, BandLab, Soundtrap, Amped Studi
 |---|---|---|
 | Exportar as notas em MIDI (.mid) | Feito: bateria, 808 e melodia em trilhas separadas | Código próprio |
 | Presets de voz por arquivo, para trocar entre pessoas | Feito: só campos de som conhecidos são aceitos | Código próprio |
-| Samples do usuário (bateria, 808, sampler) | Já existia | — |
-| Importar MIDI para a grade | A fazer | Código próprio |
-| Kits de bateria e modelos de gênero por arquivo | A fazer | Código próprio |
+| Biblioteca de sons no aparelho (página Sons) | Feito: entra pack em .zip, pasta inteira ou arquivos soltos; o tipo de cada som e a nota do 808 são lidos do nome; vale para todas as músicas e funciona sem internet; sai de volta em .zip | Código próprio; o usuário traz os sons que tem direito de usar |
+| Importar MIDI para a grade | Feito: canal 10 vira bateria, notas graves viram 808, o resto melodia, tudo preso à escala; só os 4 primeiros compassos | Código próprio |
+| Modelos de gênero por arquivo | A fazer | Código próprio |
 | Efeito de meia velocidade e parada de fita (o uso mais citado do Gross Beat) | A fazer | Código próprio |
 | Mais sons CC0 (VCSL, VSCO-2 CE, gratuitos da Karoryfer), baixados sob demanda | A fazer: recorte de 5 a 15 MB | CC0 confirmado |
 | Progressões de acordes prontas | A fazer | free-midi-chords, MIT |
@@ -109,6 +109,12 @@ Levantamento do que FL Studio, FL Studio Mobile, BandLab, Soundtrap, Amped Studi
 | Efeitos escritos em Faust, compilados no build | Depois | Só funções MIT, STK ou LGPL com exceção |
 | Plugins Web Audio Modules (WAM2) | Depois, e só de uma lista auditada copiada para o repositório | SDK MIT; a licença de cada um dos 58 plugins do catálogo não está declarada |
 | Busca no Freesound | Depois | Exige chave; só com a chave do próprio usuário e filtro CC0 |
+
+**Como fica a questão dos plugins.** VST e AU são programas instalados no sistema; navegador e celular não os carregam, e isso não muda instalando o estúdio como aplicativo. O caminho escolhido:
+
+1. Os efeitos e instrumentos vêm dentro do estúdio, feitos por nós (são os nossos "plugins").
+2. O que o usuário acrescenta é conteúdo, guardado no aparelho: sons, presets de voz e notas em MIDI.
+3. Se um dia for preciso carregar VST de verdade, isso pede uma versão de computador empacotada (Tauri ou Electron) com um hospedeiro de plugins nativo. É outro projeto, e não serve ao celular.
 
 **Não entra:**
 
@@ -138,6 +144,8 @@ Ficam de fora por decisão: separação de voz e instrumentos por IA, geração 
 - Nada foi ouvido por uma pessoa: todos os testes são medições. Timbres, tune, harmonia, sampler, esticamento e redução de ruído precisam do ouvido de quem usa.
 - Gravação com microfone real, celular de entrada e iPhone continuam sem teste. A gravação em laço foi testada com microfone simulado.
 - O teclado MIDI foi escrito sem um controlador ligado para testar.
+- A biblioteca de sons foi testada com um .zip comprimido gerado por script (4 sons) no computador. Packs reais, com centenas de arquivos, e a escolha de pasta no celular não foram testados.
+- A importação de MIDI foi testada com arquivos escritos pelo próprio estúdio, não com arquivos de outros programas.
 - O cofre de gravação, a tela sempre ligada e a pré-escuta passam na verificação de tipos, mas não foram exercitados com uma queda real da aba nem em celular.
 - Os presets de voz usam a caixa de texto do navegador para o nome e não foram testados no aplicativo instalado.
 - O recebimento pelo "compartilhar" foi testado enviando o arquivo ao service worker no computador, não a partir de um celular com o aplicativo instalado.

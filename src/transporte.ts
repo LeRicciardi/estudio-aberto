@@ -14,6 +14,7 @@ import { atualizarTeleprompter, desenharLetra, desenharTeleprompter } from './pa
 import { desenharMaster } from './paginas/master.ts';
 import { desenharMixer } from './paginas/mixer.ts';
 import { desenharProjeto } from './paginas/projeto.ts';
+import { desenharSons } from './paginas/sons.ts';
 import { desenharVozes, reafinarTodos } from './paginas/voz.ts';
 import { salvarProjeto } from './storage.ts';
 import { botao, h } from './ui/controles.ts';
@@ -209,4 +210,5 @@ export function desenharTudo() {
   desenharMaster();
   desenharLancar();
   desenharProjeto();
+  desenharSons();
 }

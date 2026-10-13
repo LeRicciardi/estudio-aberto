@@ -38,6 +38,7 @@ A tela é organizada como uma estação de trabalho: barra de transporte no topo
 | Estilo | Cartões de gênero com prévia: boombap, trap, plug, love song, drill, hard/trash, funk, mandelão, bruxaria. Cada um traz andamento, balanço, kit, timbre de voz e padrão de partida |
 | Beat | Grade de bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 20 samples prontos ou samples próprios; três volumes por nota e ajuste de volume, lado e balanço por som; ou importação de um beat pronto, com sugestão de BPM e tom |
 | Notas | Sampler (loop cortado em fatias que a grade dispara), 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com instrumentos prontos ou um sintetizador próprio (onda, filtro, envelope), teclado na tela, acordes e arpejo, tudo preso à escala da música |
+| Sons | Biblioteca de sons guardada no aparelho, para todas as músicas: recebe pack em .zip, pasta ou arquivos, adivinha o tipo pelo nome, e coloca na bateria ou no 808; recebe notas de um arquivo MIDI no padrão aberto |
 | Arranjo | Linha do tempo com os padrões em sequência e a forma de onda de cada voz; trechos com nome, partes mudas e virada; estrutura de música pronta; automação de volume desenhada para o beat e para cada voz |
 | Letra | Letra presa aos compassos do beat (uma linha por compasso), com sílabas aproximadas; aparece na tela e acompanha a música ao gravar |
 | Gravar | Gravação em laço (cada volta vira um take), teste do lugar de gravação (ruído e eco), importação de voz já gravada (WhatsApp, gravador), gravação em PCM sem compressão, contagem de 4, medidor e escolha do microfone, regravar um trecho, medição do atraso do aparelho, aviso de voz estourada ou baixa |
@@ -47,7 +48,7 @@ A tela é organizada como uma estação de trabalho: barra de transporte no topo
 | Lançar | Dados da música, ficha da licença do beat, conferência do áudio e da capa, pacote .zip com WAV, MP3 com etiquetas, acapella, instrumental, versão para DJ, versão limpa, versão em outro andamento e faixas separadas; vídeo vertical para divulgar |
 | Projeto | Exportação das notas em MIDI; recuperação de gravação interrompida, espaço usado, diagnóstico para copiar; enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
 
-A **tela simples** mostra só Estilo, Beat, Letra, Gravar, Voz, Master, Lançar e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
+A **tela simples** mostra só Estilo, Beat, Sons, Letra, Gravar, Voz, Master, Lançar e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
 
 No computador há atalhos de teclado, pintura da grade com o mouse e arrastar arquivos para a janela. Desfazer e refazer valem para tudo.
 

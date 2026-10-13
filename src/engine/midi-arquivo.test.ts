@@ -1,4 +1,4 @@
-import { paraMidi } from './midi-arquivo.ts';
+import { deMidi, paraMidi } from './midi-arquivo.ts';
 import type { Project } from '../model/project.ts';
 
 function teste(nome: string, fn: () => string | void) {
@@ -73,4 +73,29 @@ teste('bateria, 808 e melodia saem nas notas e nos tempos certos', () => {
   // Tom alto: melodia uma oitava abaixo. Grau 4 de Lá menor = Mi (57 + 7).
   garantir(melodia[0][2] === 64 && melodia[0][0] === 480 && melodia[1][0] === 480 + 1920, `melodia: ${melodia}`);
   return `${bateria.length + baixo.length + melodia.length} notas`;
+});
+
+teste('lê de volta o que exportou: mesmos passos na bateria, no 808 e na melodia', () => {
+  const r = deMidi(paraMidi(p), 9, 'menor');
+  garantir(r.bpm === 120 && r.compassos === 2, `bpm ${r.bpm}, compassos ${r.compassos}`);
+  garantir(r.bateria.kick[0] === 1 && r.bateria.kick[16] === 1 && r.bateria.kick.filter(Boolean).length === 2, 'bumbo');
+  garantir(r.bateria.hat[2] === 1, 'chimbal');
+  garantir(r.baixo[0] === 0 && r.baixo[8] === 2 && r.baixo[24] === 2, `808: ${r.baixo}`);
+  garantir(r.melodia[4][4] && r.melodia[4][20] && r.foraDaEscala === 0, 'melodia');
+  return `${r.notas} notas`;
+});
+
+teste('nota fora da escala vai para o grau mais próximo; arquivo que não é MIDI é recusado', () => {
+  // Um Dó# (61) em Dó maior: encaixa em Dó ou Ré e é contado como fora da escala.
+  const cab = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 96];
+  const eventos = [0, 0x90, 61, 100, 24, 0x80, 61, 0, 0, 0x90, 64, 100, 0, 0xff, 0x2f, 0];
+  const r = deMidi(new Uint8Array([...cab, 0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, eventos.length, ...eventos]), 0, 'maior');
+  garantir(r.foraDaEscala === 1 && r.melodia[2][1] && (r.melodia[0][0] || r.melodia[1][0]), JSON.stringify(r.melodia.map((l) => l.indexOf(true))));
+  let recusou = false;
+  try {
+    deMidi(new Uint8Array(40), 0, 'maior');
+  } catch {
+    recusou = true;
+  }
+  garantir(recusou, 'aceitou lixo');
 });

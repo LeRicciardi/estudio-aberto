@@ -1,5 +1,6 @@
 // Página Beat: bateria em grade, kits e samples, ou um beat importado.
 
+import { carregarDaBiblioteca, sonsDaBiblioteca } from '../biblioteca.ts';
 import { KITS } from '../engine/synths.ts';
 import { analisarEmSegundoPlano, esticarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { av, engine, estado, id, mudou, relogio } from '../estado.ts';
@@ -221,10 +222,22 @@ export function samples(): HTMLElement {
       mudou();
       desenharBeat();
     };
+    const meus = sonsDaBiblioteca().filter((s) => s.tipo === lane.id);
+    const daBiblioteca = h('select', { ariaLabel: `Som da minha biblioteca para ${lane.nome}` }, h('option', { value: '' }, 'Da minha biblioteca...'));
+    for (const s of meus) daBiblioteca.append(h('option', { value: s.id }, s.nome));
+    daBiblioteca.onchange = async () => {
+      const escolhido = meus.find((s) => s.id === daBiblioteca.value);
+      if (!escolhido) return;
+      if (!(await carregarDaBiblioteca(escolhido.id))) return avisar('Não consegui ler esse som.');
+      estado.projeto.samples[lane.id] = { audioId: escolhido.id, nome: escolhido.nome };
+      mudou();
+      desenharBeat();
+    };
     lista.append(h('div', { className: 'linha' },
       h('span', { className: 'nome-linha' }, lane.nome),
       atual ? h('span', { className: 'nota' }, atual.nome) : arquivo,
       !atual && deFabrica ? prontos : '',
+      !atual && meus.length ? daBiblioteca : '',
       atual
         ? botao('Voltar ao som do kit', () => {
             delete estado.projeto.samples[lane.id];

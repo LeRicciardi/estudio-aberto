@@ -79,3 +79,99 @@ export function paraMidi(p: Project): Uint8Array {
   const cabecalho = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 4, (TIQUES_POR_PASSO * 4) >> 8, (TIQUES_POR_PASSO * 4) & 255];
   return new Uint8Array([...cabecalho, ...andamento, ...trilha('Bateria', bateria), ...trilha('808', baixo), ...trilha('Melodia', melodia)]);
 }
+
+// ---------- leitura ----------
+
+export interface NotasDoMidi {
+  bpm?: number;
+  /** Tamanho em compassos: 1, 2 ou 4. O que passar de 4 compassos fica de fora. */
+  compassos: number;
+  bateria: Record<string, number[]>;
+  baixo: number[];
+  melodia: boolean[][];
+  /** Notas fora da escala da música, encaixadas no grau mais próximo. */
+  foraDaEscala: number;
+  notas: number;
+}
+
+const LANE_DA_NOTA: Record<number, string> = { 35: 'kick', 36: 'kick', 37: 'snare', 38: 'snare', 40: 'snare', 39: 'clap', 42: 'hat', 44: 'hat', 46: 'openhat' };
+
+/** Grau da escala (0 a 7) mais próximo de uma nota MIDI, e se ela já era da escala. */
+function grauDaNota(altura: number, tom: number, escala: Project['escala']): [number, boolean] {
+  const semitom = (((altura - tom) % 12) + 12) % 12;
+  let melhor = 0;
+  for (let g = 0; g < 7; g++) if (Math.abs(semitonsDoGrau(g, escala) - semitom) < Math.abs(semitonsDoGrau(melhor, escala) - semitom)) melhor = g;
+  return [melhor, semitonsDoGrau(melhor, escala) === semitom];
+}
+
+/**
+ * Lê um arquivo .mid e encaixa as notas na grade de 16 passos por compasso:
+ * canal 10 vira bateria, notas graves viram 808 e as demais, melodia. As
+ * notas são presas à escala da música.
+ */
+export function deMidi(m: Uint8Array, tom: number, escala: Project['escala']): NotasDoMidi {
+  if (String.fromCharCode(...m.subarray(0, 4)) !== 'MThd') throw new Error('Não é um arquivo MIDI');
+  const divisao = (m[12] << 8) | m[13];
+  if (divisao & 0x8000) throw new Error('MIDI com tempo em quadros não é aceito');
+  const notas: [tique: number, canal: number, altura: number, forca: number][] = [];
+  let bpm: number | undefined;
+  let i = 8 + ((m[4] << 24) | (m[5] << 16) | (m[6] << 8) | m[7]);
+  while (i + 8 <= m.length) {
+    const fim = i + 8 + ((m[i + 4] << 24) | (m[i + 5] << 16) | (m[i + 6] << 8) | m[i + 7]);
+    const ehTrilha = String.fromCharCode(...m.subarray(i, i + 4)) === 'MTrk';
+    i += 8;
+    let tique = 0;
+    let estado = 0;
+    const variavel = () => {
+      let n = 0;
+      while (i < fim) {
+        const b = m[i++];
+        n = (n << 7) | (b & 0x7f);
+        if (!(b & 0x80)) break;
+      }
+      return n;
+    };
+    while (ehTrilha && i < fim) {
+      tique += variavel();
+      if (m[i] & 0x80) estado = m[i++];
+      if (estado === 0xff) {
+        const tipo = m[i++];
+        const n = variavel();
+        if (tipo === 0x51 && n === 3 && bpm === undefined) bpm = Math.round(60_000_000 / ((m[i] << 16) | (m[i + 1] << 8) | m[i + 2]));
+        i += n;
+      } else if (estado === 0xf0 || estado === 0xf7) {
+        i += variavel();
+      } else {
+        const tipo = estado & 0xf0;
+        if (tipo === 0x90 && m[i + 1] > 0) notas.push([tique, estado & 15, m[i], m[i + 1]]);
+        i += tipo === 0xc0 || tipo === 0xd0 ? 1 : 2;
+      }
+    }
+    i = fim;
+  }
+  const passoDe = (tique: number) => Math.round(tique / (divisao / 4));
+  const ultimo = notas.reduce((n, nota) => Math.max(n, passoDe(nota[0])), 0);
+  const compassos = ultimo < 16 ? 1 : ultimo < 32 ? 2 : 4;
+  const passos = compassos * 16;
+  const r: NotasDoMidi = {
+    bpm, compassos, foraDaEscala: 0, notas: 0,
+    bateria: Object.fromEntries(Object.keys(NOTA_DA_BATERIA).map((lane) => [lane, Array.from({ length: passos }, () => 0)])),
+    baixo: Array.from({ length: passos }, () => -1),
+    melodia: Array.from({ length: 8 }, () => Array.from({ length: passos }, () => false)),
+  };
+  for (const [tique, canal, altura, forca] of notas) {
+    const s = passoDe(tique);
+    if (s >= passos) continue;
+    r.notas++;
+    if (canal === 9) {
+      r.bateria[LANE_DA_NOTA[altura] ?? 'perc'][s] = forca >= 120 ? 6 : forca < 70 ? 5 : 1;
+      continue;
+    }
+    const [grau, naEscala] = grauDaNota(altura, tom, escala);
+    if (!naEscala) r.foraDaEscala++;
+    if (altura < 48) r.baixo[s] = grau;
+    // A tônica mais aguda do arquivo vai para a linha de cima da grade.
+    else r.melodia[grau === 0 && altura - tom >= 72 ? 7 : grau][s] = true;
+  }
+  return r;
+}
