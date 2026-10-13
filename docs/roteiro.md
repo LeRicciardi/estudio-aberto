@@ -88,6 +88,34 @@ Duas pesquisas (áudio e processamento; fluxo de trabalho, confiabilidade e vali
 - **Testes automáticos de ponta a ponta** no navegador e matriz de aparelhos reais.
 - **Tradução** e auditoria de acessibilidade.
 
+## Bibliotecas, plugins e extensões
+
+Levantamento do que FL Studio, FL Studio Mobile, BandLab, Soundtrap, Amped Studio, Audiotool e GarageBand entregam, e do que um estúdio MIT em site estático pode fornecer. Fontes: páginas oficiais, manuais e repositórios; licenças lidas na origem.
+
+**O que eles têm e nós não podemos copiar:** bibliotecas de milhões de loops (FL Cloud, BandLab Sounds), plugins VST/AU (precisam de programa instalado), separação de voz por IA, distribuição para as plataformas. Tudo isso depende de servidor, contrato ou código fechado.
+
+| O que oferecer | Situação | Licença e peso |
+|---|---|---|
+| Exportar as notas em MIDI (.mid) | Feito: bateria, 808 e melodia em trilhas separadas | Código próprio |
+| Presets de voz por arquivo, para trocar entre pessoas | Feito: só campos de som conhecidos são aceitos | Código próprio |
+| Samples do usuário (bateria, 808, sampler) | Já existia | — |
+| Importar MIDI para a grade | A fazer | Código próprio |
+| Kits de bateria e modelos de gênero por arquivo | A fazer | Código próprio |
+| Efeito de meia velocidade e parada de fita (o uso mais citado do Gross Beat) | A fazer | Código próprio |
+| Mais sons CC0 (VCSL, VSCO-2 CE, gratuitos da Karoryfer), baixados sob demanda | A fazer: recorte de 5 a 15 MB | CC0 confirmado |
+| Progressões de acordes prontas | A fazer | free-midi-chords, MIT |
+| Importar SoundFont do usuário (SF2/SF3) | Depois | spessasynth, Apache-2.0; não embutir bancos de 30 a 140 MB |
+| Reverb por convolução com salas reais | Depois, opcional | Voxengo IM Reverbs só pode ser redistribuído inteiro e com o aviso (6,9 MB) |
+| Efeitos escritos em Faust, compilados no build | Depois | Só funções MIT, STK ou LGPL com exceção |
+| Plugins Web Audio Modules (WAM2) | Depois, e só de uma lista auditada copiada para o repositório | SDK MIT; a licença de cada um dos 58 plugins do catálogo não está declarada |
+| Busca no Freesound | Depois | Exige chave; só com a chave do próprio usuário e filtro CC0 |
+
+**Não entra:**
+
+- Carregar plugin ou script de um endereço qualquer: o código rodaria com acesso aos projetos e ao microfone.
+- Kits de 808 "de domínio público" sem dedicação formal (smpldsnds, tidal-drum-machines), 99Sounds (proíbe redistribuir), SampleSwap, EchoThief. O 808 continua sintetizado ou com sample do usuário.
+- WebAudioFont (GPL-3), código gerado pelo RNBO (GPL-3 ou proprietária), Csound em WebAssembly (precisa de cabeçalhos que o GitHub Pages não permite).
+
 ## O que as pesquisas trouxeram e ainda não entrou
 
 - **Comparar com uma música de referência**, com o volume igualado.

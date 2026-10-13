@@ -7,7 +7,8 @@ import { novoProjeto } from '../model/generos.ts';
 import { avisar, secProjeto } from '../moldura.ts';
 import { abrirVersao, apagarAudio, empacotarProjeto, espaco, guardarVersao, juntarVozes, listarVersoes } from '../storage.ts';
 import { desenharTudo, parar } from '../transporte.ts';
-import { botao, campo, h } from '../ui/controles.ts';
+import { baixar, botao, campo, h } from '../ui/controles.ts';
+import { paraMidi } from '../engine/midi-arquivo.ts';
 
 const listaDeVersoes = h('div', { className: 'versoes' });
 
@@ -87,6 +88,7 @@ export function desenharProjeto() {
     h('div', { className: 'linha' },
       botao('Salvar projeto em arquivo', () => void salvarEmArquivo()),
       campo('Abrir projeto de um arquivo', abrir),
+      Object.assign(botao('Exportar as notas em MIDI', () => baixar(new Blob([paraMidi(estado.projeto)], { type: 'audio/midi' }), `${estado.projeto.nome || 'musica'}.mid`)), { title: 'Bateria, 808 e melodia num arquivo .mid, para abrir no FL Studio, Ableton, BandLab e outros' }),
     ),
     h('h3', {}, 'Trabalhar com outra pessoa'),
     h('p', { className: 'nota' }, 'Mande o arquivo do projeto para o parceiro. Ele abre, grava a parte dele e devolve o arquivo. Aqui você junta as vozes dele às suas, sem perder nada do seu lado.'),

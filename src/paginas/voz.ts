@@ -133,6 +133,28 @@ const CAMPOS_DO_PRESET = ['preset', 'tune', 'altura', 'reverb', 'tamanhoReverb',
 
 const lerPresets = (): Record<string, Partial<Take>> => JSON.parse(localStorage.getItem(CHAVE_DOS_PRESETS) ?? '{}');
 
+/** Recebe um arquivo de presets (de outro aparelho ou de outra pessoa) e soma aos guardados. */
+function arquivoDePresets(): HTMLInputElement {
+  const entrada = h('input', { type: 'file', accept: '.json,application/json' });
+  entrada.onchange = async () => {
+    try {
+      const dados = JSON.parse((await entrada.files?.[0]?.text()) ?? '');
+      if (dados?.estudioAberto !== 'presets-de-voz' || typeof dados.presets !== 'object') throw new Error('formato');
+      // Só entram os campos de som conhecidos: o arquivo vem de fora.
+      const novos: Record<string, Partial<Take>> = {};
+      for (const [nome, preset] of Object.entries(dados.presets as Record<string, Record<string, unknown>>)) {
+        novos[nome] = Object.fromEntries(CAMPOS_DO_PRESET.filter((c) => preset?.[c] !== undefined).map((c) => [c, preset[c]]));
+      }
+      localStorage.setItem(CHAVE_DOS_PRESETS, JSON.stringify({ ...lerPresets(), ...novos }));
+      desenharVozes();
+      avisar(`${Object.keys(novos).length} preset(s) recebido(s).`);
+    } catch {
+      avisar('Este arquivo não é um arquivo de presets do Estúdio Aberto.');
+    }
+  };
+  return entrada;
+}
+
 /** Presets da pessoa: guardar a cadeia de efeitos de um take e aplicar em outros takes e outras músicas. */
 function presets(take: Take): HTMLElement {
   const guardados = lerPresets();
@@ -156,6 +178,8 @@ function presets(take: Take): HTMLElement {
       desenharVozes();
       avisar(`Preset "${nome}" guardado. Ele fica disponível em todas as músicas neste navegador.`);
     }),
+    nomes.length ? botao('Salvar presets em arquivo', () => baixar(new Blob([JSON.stringify({ estudioAberto: 'presets-de-voz', presets: guardados })], { type: 'application/json' }), 'presets-de-voz.json')) : '',
+    campo('Abrir arquivo de presets', arquivoDePresets()),
   );
 }
 

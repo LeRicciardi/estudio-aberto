@@ -45,7 +45,7 @@ A tela é organizada como uma estação de trabalho: barra de transporte no topo
 | Mixer | Uma faixa por canal (bateria, 808, melodia, beat, cada voz, master) com medidor, volume, lado, mudo e solo. O beat abre espaço sozinho quando a voz entra |
 | Master | Botão grande de volume final, analisador de espectro ao vivo, acabamento (compressor de cola, multibanda, ganho, limitador de pico real), equalizador de 3 bandas, largura do estéreo, volume final em LUFS; diagnóstico da mix, que mede, explica e corrige; escuta em mono e em caixa de celular; exportação em WAV, MP3, acapella e instrumental, com BPM e tom no nome do arquivo |
 | Lançar | Dados da música, ficha da licença do beat, conferência do áudio e da capa, pacote .zip com WAV, MP3 com etiquetas, acapella, instrumental, versão para DJ, versão limpa, versão em outro andamento e faixas separadas; vídeo vertical para divulgar |
-| Projeto | Recuperação de gravação interrompida, espaço usado, diagnóstico para copiar; enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
+| Projeto | Exportação das notas em MIDI; recuperação de gravação interrompida, espaço usado, diagnóstico para copiar; enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
 
 A **tela simples** mostra só Estilo, Beat, Letra, Gravar, Voz, Master, Lançar e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
 
