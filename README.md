@@ -4,6 +4,10 @@ Estúdio de música aberto, no navegador, para artistas independentes que gravam
 
 O código é escrito para ser lido. Cada mecanismo de áudio está em um arquivo pequeno, comentado em português, explicando o que faz e por quê. A interface repete essas explicações em "O que isso faz?".
 
+**Abrir o estúdio: https://lericciardi.github.io/estudio-aberto/**
+
+No celular, abra o endereço no navegador e use "Instalar aplicativo" (Android) ou Compartilhar → "Adicionar à Tela de Início" (iPhone).
+
 ## Como rodar
 
 ```bash
@@ -18,6 +22,12 @@ npm test
 ```
 
 Roda os testes do motor sem navegador: tune, limitador, medidor LUFS e medição de atraso.
+
+```bash
+npm run publicar
+```
+
+Gera o build e publica no GitHub Pages (ramo `gh-pages`).
 
 ## O que já existe
 
@@ -78,7 +88,6 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 - Cada padrão tem um compasso; frases mais longas são feitas alternando padrões no arranjo.
 - Ao vivo, o limitador é aproximado por um compressor; o limitador de pico real só entra na exportação.
 - A montagem de takes corta em limites de compasso (1, 2 ou 4); não há corte livre dentro do take.
-- Para instalar no celular, o site precisa estar publicado em um endereço https. Ele ainda não está publicado.
 - Não há colaboração em nuvem; a troca é pelo arquivo de projeto.
 - Não foi testado em iPhone nem em Android de entrada. Os riscos conhecidos estão em `docs/pesquisa.md`.
 
