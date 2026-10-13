@@ -7,7 +7,7 @@ import {
 import { limitar } from './limiter.ts';
 import { medirLufs } from './loudness.ts';
 import { Mixer } from './mixer.ts';
-import { tocarBaixo, tocarNota, tocarTambor } from './synths.ts';
+import { tocarBaixo, tocarBaixoSample, tocarNota, tocarTambor } from './synths.ts';
 import { RelogioDePassos, duracaoDoPasso, tempoDoPasso } from './tempo.ts';
 
 type Buffers = Map<string, AudioBuffer>;
@@ -18,6 +18,17 @@ function hzDoGrau(p: Project, grau: number, oitava: 'baixo' | 'melodia'): number
   // Tons altos descem uma oitava na melodia para não ficar estridente.
   const base = oitava === 'baixo' ? 32.703 : p.tom > 6 ? 130.81 : 261.63;
   return base * 2 ** (semitons / 12);
+}
+
+/**
+ * Quanto acelerar um sample gravado na nota `notaDoSample` para soar em `hz`.
+ * A oitava é escolhida para mexer o mínimo possível na velocidade do sample.
+ */
+function razaoDoSample(hz: number, notaDoSample: number): number {
+  let razao = hz / (32.703 * 2 ** (notaDoSample / 12));
+  while (razao > Math.SQRT2) razao /= 2;
+  while (razao < Math.SQRT1_2) razao *= 2;
+  return razao;
 }
 
 /** Toca tudo que um padrão tem em um passo: bateria, 808 e melodia. */
@@ -51,7 +62,13 @@ function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Bu
         }
       }
     }
-    tocarBaixo(ctx, mixer.barraBaixo, p.kit, hzDoGrau(p, grau, 'baixo'), quando, de);
+    const sample = buffers.get(p.sample808?.audioId ?? '');
+    if (sample && p.sample808) {
+      const razao = (hz: number) => razaoDoSample(hz, p.sample808!.nota);
+      tocarBaixoSample(ctx, mixer.barraBaixo, sample, razao(hzDoGrau(p, grau, 'baixo')), quando, de && razao(de));
+    } else {
+      tocarBaixo(ctx, mixer.barraBaixo, p.kit, hzDoGrau(p, grau, 'baixo'), quando, de);
+    }
   }
   padrao.melodia.forEach((linha, g) => {
     if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur);

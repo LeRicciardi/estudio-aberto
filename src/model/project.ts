@@ -33,6 +33,7 @@ export type InstrumentoId = 'sino' | 'piano' | 'pluck' | 'pad' | 'lead';
 export type PresetVoz = 'cru' | 'rap' | 'boombap' | 'trap' | 'plug' | 'rnb' | 'drill' | 'hard' | 'funk';
 export type PresetMaster = 'desligado' | 'limpo' | 'alto';
 export type DivisaoDelay = 4 | 8 | 16;
+export type TamanhoReverb = 'quarto' | 'sala' | 'salao';
 
 /**
  * Valor de um passo da bateria:
@@ -68,10 +69,20 @@ export interface Take {
   pan: number;
   mudo: boolean;
   preset: PresetVoz;
-  tune: { ligado: boolean; velocidade: number };
+  /** `intensidade`: 0 = não corrige, 1 = corrige até a nota exata. */
+  tune: { ligado: boolean; velocidade: number; intensidade: number };
+  /** Sobe ou desce a voz inteira, em semitons (-12 a +12). */
+  altura: number;
   reverb: number;
+  tamanhoReverb: TamanhoReverb;
   delay: number;
   divisaoDelay: DivisaoDelay;
+  /** Quanto de cada eco volta para o delay: mais alto, mais repetições. */
+  repeticoes: number;
+  /** Distorção extra, de 0 a 1, somada à do timbre. */
+  distorcao: number;
+  /** Efeito de telefone: só os médios da voz. */
+  telefone: boolean;
   /** Se o take participa da montagem (comping) ou toca sempre inteiro. */
   naMontagem: boolean;
 }
@@ -98,6 +109,8 @@ export interface Project {
   };
   /** Samples do usuário por som da bateria; sem sample, o som é sintetizado. */
   samples: Partial<Record<LaneId, { audioId: string; nome: string }>>;
+  /** Sample de 808 do usuário. `nota` é a nota em que ele foi gravado (0 = Dó). */
+  sample808?: { audioId: string; nome: string; nota: number };
   padroes: Padrao[];
   arranjo: Bloco[];
   takes: Take[];
@@ -129,8 +142,10 @@ export function novoTake(id: string, nome: string, audioId: string, inicio: numb
     id, nome, audioId, inicio,
     volume: 0.9, pan: 0, mudo: false,
     preset: voz.preset,
-    tune: { ligado: voz.tune, velocidade: voz.velocidade },
-    reverb: 0.1, delay: 0, divisaoDelay: 8,
+    tune: { ligado: voz.tune, velocidade: voz.velocidade, intensidade: 1 },
+    altura: 0,
+    reverb: 0.1, tamanhoReverb: 'sala', delay: 0, divisaoDelay: 8, repeticoes: 0.35,
+    distorcao: 0, telefone: false,
     naMontagem: false,
   };
 }
@@ -140,6 +155,23 @@ export function novoTake(id: string, nome: string, audioId: string, inicio: numb
  * áudio deles começa com "fabrica:" e o arquivo é baixado quando escolhido.
  */
 export const SAMPLES_DE_FABRICA: Partial<Record<LaneId, { arquivo: string; nome: string }[]>> = {
+  snare: [
+    { arquivo: 'caixa-1.wav', nome: 'Caixa acústica' },
+    { arquivo: 'caixa-aro-1.wav', nome: 'Caixa no aro' },
+  ],
+  clap: [
+    { arquivo: 'palma-1.wav', nome: 'Palma' },
+    { arquivo: 'palma-dedos-1.wav', nome: 'Palma de dedos' },
+  ],
+  hat: [
+    { arquivo: 'chimbal-fechado-1.wav', nome: 'Chimbal fechado curto' },
+    { arquivo: 'chimbal-fechado-2.wav', nome: 'Chimbal fechado' },
+  ],
+  openhat: [{ arquivo: 'chimbal-aberto-1.wav', nome: 'Chimbal aberto' }],
+  perc: [
+    { arquivo: 'estalo-1.wav', nome: 'Estalo de dedos' },
+    { arquivo: 'caixa-aro-1.wav', nome: 'Caixa no aro' },
+  ],
   kick: [
     { arquivo: 'bumbo-fundo-1.wav', nome: 'Bumbo fundo 1' },
     { arquivo: 'bumbo-fundo-2.wav', nome: 'Bumbo fundo 2' },
@@ -155,13 +187,21 @@ export const PREFIXO_DE_FABRICA = 'fabrica:';
 export function normalizar(p: Project): Project {
   p.samples ??= {};
   p.montagem ??= { ligada: false, compassos: 2, escolha: [] };
-  for (const t of p.takes) t.naMontagem ??= false;
+  for (const t of p.takes) {
+    t.naMontagem ??= false;
+    t.tune.intensidade ??= 1;
+    t.altura ??= 0;
+    t.tamanhoReverb ??= 'sala';
+    t.repeticoes ??= 0.35;
+    t.distorcao ??= 0;
+    t.telefone ??= false;
+  }
   return p;
 }
 
 /** Todo áudio que o projeto usa: beat importado, samples e takes. */
 export function idsDeAudio(p: Project): string[] {
-  const ids = [p.beat.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
+  const ids = [p.beat.audioId, p.sample808?.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
   return ids.filter((a): a is string => !!a);
 }
 
@@ -180,9 +220,12 @@ export function padraoNoCompasso(p: Project, compasso: number): Padrao | undefin
   return undefined;
 }
 
+/** O take passa pelo processador de afinação se o tune está ligado ou a altura foi mudada. */
+export const usaTune = (take: Take) => take.tune.ligado || take.altura !== 0;
+
 /** Qual buffer tocar para um take: a versão afinada, se existir, ou a original. */
 export function bufferDoTake(take: Take, buffers: Map<string, AudioBuffer>): AudioBuffer | undefined {
-  return (take.tune.ligado && buffers.get(take.audioId + ':tune')) || buffers.get(take.audioId);
+  return (usaTune(take) && buffers.get(take.audioId + ':tune')) || buffers.get(take.audioId);
 }
 
 export function duracaoDaMusica(p: Project, buffers: Map<string, AudioBuffer>): number {

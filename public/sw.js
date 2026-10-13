@@ -1,12 +1,8 @@
 // Service worker: guarda os arquivos do aplicativo no aparelho para ele abrir
 // sem internet. Com internet, sempre busca a versão mais nova.
 
-const CACHE = 'estudio-aberto-v2';
-const EXTRAS = [
-  'captura.worklet.js', 'manifest.webmanifest', 'icone-192.png', 'icone-512.png',
-  'samples/bumbo-fundo-1.wav', 'samples/bumbo-fundo-2.wav', 'samples/bumbo-estalado-1.wav',
-  'samples/bumbo-estalado-2.wav', 'samples/bumbo-distorcido-1.wav', 'samples/bumbo-distorcido-2.wav',
-];
+const CACHE = 'estudio-aberto-v3';
+const EXTRAS = ['captura.worklet.js', 'manifest.webmanifest', 'icone-192.png', 'icone-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

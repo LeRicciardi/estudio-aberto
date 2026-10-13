@@ -3,7 +3,7 @@
 // (AudioContext) e para exportar (OfflineAudioContext).
 
 import type { PresetMaster, Project, Take } from '../model/project.ts';
-import { criarCadeiaDeVoz, type CadeiaDeVoz } from './vocalChain.ts';
+import { chaveDaCadeia, criarCadeiaDeVoz, type CadeiaDeVoz } from './vocalChain.ts';
 
 export const PRESETS_MASTER: Record<PresetMaster, { nome: string; cola: [number, number]; ganhoDb: number; teto: number; explicacao: string[] }> = {
   desligado: { nome: 'Desligado', cola: [0, 1], ganhoDb: 0, teto: 0, explicacao: ['A mix sai sem tratamento final.'] },
@@ -94,21 +94,21 @@ export class Mixer {
   }
 
   private sincronizarCanal(take: Take, bpm: number) {
-    const chave = `${take.preset}|${take.divisaoDelay}|${bpm}`;
+    const chave = chaveDaCadeia(take, bpm);
     let canal = this.canais.get(take.id);
     if (!canal) {
       const entrada = this.ctx.createGain();
       const volume = this.ctx.createGain();
       const pan = this.ctx.createStereoPanner();
       volume.connect(pan).connect(this.entradaMaster);
-      canal = { entrada, volume, pan, cadeia: criarCadeiaDeVoz(this.ctx, take.preset, bpm, take.divisaoDelay), chave };
+      canal = { entrada, volume, pan, cadeia: criarCadeiaDeVoz(this.ctx, take, bpm), chave };
       entrada.connect(canal.cadeia.entrada);
       canal.cadeia.saida.connect(volume);
       this.canais.set(take.id, canal);
     } else if (canal.chave !== chave) {
       canal.entrada.disconnect();
       canal.cadeia.desligar();
-      canal.cadeia = criarCadeiaDeVoz(this.ctx, take.preset, bpm, take.divisaoDelay);
+      canal.cadeia = criarCadeiaDeVoz(this.ctx, take, bpm);
       canal.entrada.connect(canal.cadeia.entrada);
       canal.cadeia.saida.connect(canal.volume);
       canal.chave = chave;
@@ -117,6 +117,7 @@ export class Mixer {
     canal.pan.pan.value = take.pan;
     canal.cadeia.mandadaReverb.gain.value = take.reverb;
     canal.cadeia.mandadaDelay.gain.value = take.delay;
+    canal.cadeia.realimentacao.gain.value = take.repeticoes;
   }
 
   private montarMaster(preset: PresetMaster) {

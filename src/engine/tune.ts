@@ -104,6 +104,10 @@ export interface OpcoesTune {
   escala: EscalaTune;
   /** 0 = pula direto para a nota (efeito robótico); 1 = desliza devagar (natural). */
   velocidade: number;
+  /** Quanto da correção aplicar: 0 = nada, 1 = até a nota exata. Padrão 1. */
+  intensidade?: number;
+  /** Semitons somados à voz inteira (voz mais grossa ou mais fina). Padrão 0. */
+  transpor?: number;
 }
 
 export function afinar(x: Float32Array, taxa: number, op: OpcoesTune): Float32Array {
@@ -114,23 +118,25 @@ export function afinar(x: Float32Array, taxa: number, op: OpcoesTune): Float32Ar
   const periodo = new Float32Array(quadros);
   const razao = new Float32Array(quadros);
   const suavizacao = op.velocidade <= 0 ? 1 : 1 - Math.exp(-(SALTO / taxa) / (op.velocidade * 0.25));
+  const intensidade = op.intensidade ?? 1;
+  const transpor = op.transpor ?? 0;
   let saida = 0;
   let cantando = false;
   let ultimoPeriodo = taxa / 200;
   for (let q = 0; q < quadros; q++) {
     if (f0[q] > 0) {
       const midi = paraMidi(f0[q]);
-      const alvo = notaAlvo(midi, op.tom, op.escala);
+      const alvo = midi + (notaAlvo(midi, op.tom, op.escala) - midi) * intensidade;
       // No começo de cada nota parte da altura cantada; depois persegue o alvo.
       saida = cantando ? saida + (alvo - saida) * suavizacao : midi + (alvo - midi) * suavizacao;
       cantando = true;
       ultimoPeriodo = taxa / f0[q];
       // Menos de 3 cents de erro ninguém ouve: melhor deixar a voz intacta.
-      const semitons = Math.abs(saida - midi) < 0.03 ? 0 : saida - midi;
+      const semitons = (Math.abs(saida - midi) < 0.03 ? 0 : saida - midi) + transpor;
       razao[q] = Math.min(2, Math.max(0.5, 2 ** (semitons / 12)));
     } else {
       cantando = false;
-      razao[q] = 1;
+      razao[q] = 2 ** (transpor / 12);
     }
     periodo[q] = ultimoPeriodo;
   }

@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 
 /**
@@ -8,7 +9,8 @@ function listaParaOffline(): Plugin {
   return {
     name: 'lista-para-offline',
     generateBundle(_, bundle) {
-      this.emitFile({ type: 'asset', fileName: 'arquivos.json', source: JSON.stringify(['./', ...Object.keys(bundle)]) });
+      const samples = readdirSync('public/samples').filter((f) => f.endsWith('.wav')).map((f) => `samples/${f}`);
+      this.emitFile({ type: 'asset', fileName: 'arquivos.json', source: JSON.stringify(['./', ...Object.keys(bundle), ...samples]) });
     },
   };
 }

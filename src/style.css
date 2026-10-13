@@ -121,3 +121,8 @@ h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spac
 .grade.montagem .passo:disabled { opacity: 0.25; cursor: default; }
 .passo.cabeca { background: none; color: var(--suave); font-weight: 400; }
 .caixa.nome-linha { padding: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+h4 { margin: 14px 0 6px; font-size: 13px; color: var(--texto); }
+
+body.simples .avancado { display: none !important; }
+body:not(.simples) .so-simples { display: none; }

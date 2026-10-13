@@ -42,6 +42,14 @@ for (const [entrada, esperado] of [[226, 220], [452, 440], [212, 220], [160, 164
   conferir(`afina ${entrada} Hz para ${esperado} Hz`, Math.abs(cents(medido, esperado)) < 12, `${medido.toFixed(2)} Hz (${cents(medido, esperado).toFixed(1)} cents)`);
 }
 
+// Intensidade pela metade corrige metade do caminho; transpor sobe a voz inteira.
+const metade = pitchMedio(afinar(voz(226, 1.5), TAXA, { tom: 9, escala: 'menor', velocidade: 0, intensidade: 0.5 }));
+conferir('intensidade 50% corrige metade', Math.abs(cents(metade, 220) - cents(226, 220) / 2) < 4, `${metade.toFixed(2)} Hz`);
+const acima = pitchMedio(afinar(voz(220, 1.5), TAXA, { tom: 9, escala: 'menor', velocidade: 0, intensidade: 0, transpor: 3 }));
+conferir('transpor +3 semitons', Math.abs(cents(acima, 220 * 2 ** (3 / 12))) < 12, `${acima.toFixed(2)} Hz`);
+const abaixo = pitchMedio(afinar(voz(220, 1.5), TAXA, { tom: 9, escala: 'menor', velocidade: 0, intensidade: 0, transpor: -5 }));
+conferir('transpor -5 semitons', Math.abs(cents(abaixo, 220 * 2 ** (-5 / 12))) < 12, `${abaixo.toFixed(2)} Hz`);
+
 // Nota já afinada não pode ser alterada, e silêncio continua silêncio.
 const certo = voz(220, 1);
 const y = afinar(certo, TAXA, { tom: 9, escala: 'menor', velocidade: 0 });

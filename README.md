@@ -34,13 +34,14 @@ Gera o build e publica no GitHub Pages (ramo `gh-pages`).
 | Etapa | Recurso |
 |---|---|
 | Estilo | Modelos para boombap, trap, plug, love song, drill, hard/trash, funk, mandelão e bruxaria: andamento, balanço, kit, timbre de voz e padrão de partida |
-| Beat | Bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados ou samples próprios por som; 808 em grade de notas com deslize; melodia com 5 instrumentos; padrões e arranjo; ou importação de um beat pronto |
+| Beat | Bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 14 samples prontos (bumbo, caixa, palma, chimbais, estalo) ou samples próprios; 808 em grade de notas com deslize, sintetizado ou por sample próprio afinado; melodia com 5 instrumentos; padrões e arranjo; ou importação de um beat pronto |
 | Voz | Gravação em PCM sem compressão, vários takes, medição do atraso do aparelho, montagem por trechos (comping) |
-| Tune | Correção de afinação para o tom e a escala da música, de robótico a natural |
-| Mix | Por take: volume, lado, 9 timbres por gênero, reverb e delay no tempo do beat; espaço no beat para a voz |
+| Tune | Correção de afinação para o tom e a escala da música: velocidade (robótico a natural), intensidade e altura da voz (±12 semitons) |
+| Mix | Por take: volume, lado, 9 timbres por gênero, reverb (3 tamanhos), delay no tempo do beat com repetições, distorção, voz de telefone; espaço no beat para a voz |
 | Master | Compressor de cola, ganho, limitador de pico real e medidor LUFS |
 | Exportação | WAV (16 bits, 44,1 kHz), MP3, só vozes, só beat |
 | Projeto | Salvamento automático no navegador, desfazer/refazer, arquivo único com projeto e áudio |
+| Tela | Modo simples (só o caminho principal) e modo completo |
 | Aplicativo | Instalável no celular e no computador (PWA), abre sem internet |
 
 ## Como o código está organizado
@@ -84,7 +85,8 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 
 - O tune é aplicado depois da gravação, não ao vivo durante o canto. É uma escolha: no navegador, efeito ao vivo aumenta o atraso.
 - Os modelos de funk, mandelão e bruxaria são aproximações e precisam ser corrigidos por quem é da cena.
-- Os samples prontos são só seis bumbos: a biblioteca de domínio público usada (Meadowlark) só tem bumbos. Os demais sons de fábrica são sintetizados, e outros samples entram por arquivo do usuário. O 808 e a melodia ainda não aceitam samples.
+- Os samples prontos de caixa, palma e chimbal são de bateria acústica, não de bateria eletrônica. Não há sample pronto de 808 (nenhum com licença de domínio público verificável); o 808 aceita sample do usuário. A melodia ainda não aceita samples.
+- A altura da voz preserva o timbre (formantes): não faz o efeito de voz "de esquilo".
 - Cada padrão tem um compasso; frases mais longas são feitas alternando padrões no arranjo.
 - Ao vivo, o limitador é aproximado por um compressor; o limitador de pico real só entra na exportação.
 - A montagem de takes corta em limites de compasso (1, 2 ou 4); não há corte livre dentro do take.

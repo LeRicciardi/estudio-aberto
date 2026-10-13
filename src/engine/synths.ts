@@ -228,6 +228,34 @@ export function tocarBaixo(ctx: BaseAudioContext, destino: AudioNode, kitId: Kit
   ultimoBaixo.set(destino, g);
 }
 
+/**
+ * 808 a partir de um sample do usuário. Tocar o sample mais rápido deixa a
+ * nota mais aguda, e mais devagar, mais grave: `razao` é quanto acelerar para
+ * chegar na nota pedida. Com `deRazao`, a nota desliza a partir da anterior.
+ */
+export function tocarBaixoSample(ctx: BaseAudioContext, destino: AudioNode, sample: AudioBuffer, razao: number, t: number, deRazao?: number) {
+  const anterior = ultimoBaixo.get(destino);
+  if (anterior) {
+    const g = anterior.gain;
+    if ('cancelAndHoldAtTime' in g) g.cancelAndHoldAtTime(t);
+    else (g as AudioParam).cancelScheduledValues(t);
+    g.setTargetAtTime(0, t, 0.006);
+  }
+  const s = ctx.createBufferSource();
+  s.buffer = sample;
+  if (deRazao) {
+    s.playbackRate.setValueAtTime(deRazao, t);
+    s.playbackRate.exponentialRampToValueAtTime(razao, t + 0.09);
+  } else {
+    s.playbackRate.setValueAtTime(razao, t);
+  }
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.9, t);
+  s.connect(g).connect(destino);
+  s.start(t);
+  ultimoBaixo.set(destino, g);
+}
+
 // ---------- instrumentos de melodia ----------
 
 export const INSTRUMENTOS: Record<InstrumentoId, string> = {

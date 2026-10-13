@@ -2,7 +2,7 @@
 // Cada preset é uma receita de timbre (filtros + compressor). Reverb e delay
 // são mandadas ajustáveis por take.
 
-import type { DivisaoDelay, PresetVoz } from '../model/project.ts';
+import type { PresetVoz, Take, TamanhoReverb } from '../model/project.ts';
 import { saturador } from './synths.ts';
 
 interface Receita {
@@ -105,19 +105,30 @@ export const PRESETS_VOZ: Record<PresetVoz, Receita> = {
   },
 };
 
-const impulsos = new WeakMap<BaseAudioContext, AudioBuffer>();
+export const TAMANHOS_DE_REVERB: Record<TamanhoReverb, { nome: string; segundos: number }> = {
+  quarto: { nome: 'Quarto (curto)', segundos: 0.6 },
+  sala: { nome: 'Sala (médio)', segundos: 1.8 },
+  salao: { nome: 'Salão (longo)', segundos: 3.5 },
+};
 
-/** Resposta ao impulso sintética: ruído que decai, como o eco difuso de uma sala. */
-function impulsoDeSala(ctx: BaseAudioContext): AudioBuffer {
-  let b = impulsos.get(ctx);
+const impulsos = new WeakMap<BaseAudioContext, Map<TamanhoReverb, AudioBuffer>>();
+
+/**
+ * Resposta ao impulso sintética: ruído que decai, como o eco difuso de uma
+ * sala. Quanto mais longo o decaimento, maior o espaço parece.
+ */
+function impulsoDeSala(ctx: BaseAudioContext, tamanho: TamanhoReverb): AudioBuffer {
+  let porTamanho = impulsos.get(ctx);
+  if (!porTamanho) impulsos.set(ctx, (porTamanho = new Map()));
+  let b = porTamanho.get(tamanho);
   if (!b) {
-    const n = Math.floor(ctx.sampleRate * 2.2);
+    const n = Math.floor(ctx.sampleRate * TAMANHOS_DE_REVERB[tamanho].segundos);
     b = ctx.createBuffer(2, n, ctx.sampleRate);
     for (let c = 0; c < 2; c++) {
       const d = b.getChannelData(c);
       for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 3;
     }
-    impulsos.set(ctx, b);
+    porTamanho.set(tamanho, b);
   }
   return b;
 }
@@ -127,10 +138,16 @@ export interface CadeiaDeVoz {
   saida: AudioNode;
   mandadaReverb: GainNode;
   mandadaDelay: GainNode;
+  realimentacao: GainNode;
   desligar(): void;
 }
 
-export function criarCadeiaDeVoz(ctx: BaseAudioContext, preset: PresetVoz, bpm: number, divisao: DivisaoDelay): CadeiaDeVoz {
+/** Tudo que, ao mudar, obriga a remontar a cadeia (o resto é ajustado ao vivo). */
+export const chaveDaCadeia = (take: Take, bpm: number) =>
+  [take.preset, take.divisaoDelay, bpm, take.tamanhoReverb, take.telefone, Math.round(take.distorcao * 20)].join('|');
+
+export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number): CadeiaDeVoz {
+  const { preset, divisaoDelay: divisao } = take;
   const r = PRESETS_VOZ[preset];
   const entrada = ctx.createGain();
   const saida = ctx.createGain();
@@ -142,6 +159,23 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, preset: PresetVoz, bpm: 
     fim = no;
     return no;
   };
+
+  // Saturar aumenta muito o volume; o ganho depois devolve ao nível de antes,
+  // para a distorção mudar o timbre e não a altura do som.
+  const saturar = (forca: number) => {
+    ligar(saturador(ctx, forca));
+    ligar(ctx.createGain()).gain.value = 1 / Math.sqrt(forca);
+  };
+
+  if (take.telefone) {
+    // Telefone antigo só transmitia os médios: sem grave e sem agudo.
+    const semGrave = ligar(ctx.createBiquadFilter());
+    semGrave.type = 'highpass';
+    semGrave.frequency.value = 450;
+    const semAgudo = ligar(ctx.createBiquadFilter());
+    semAgudo.type = 'lowpass';
+    semAgudo.frequency.value = 2800;
+  }
 
   if (preset !== 'cru') {
     const hp = ligar(ctx.createBiquadFilter());
@@ -164,8 +198,9 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, preset: PresetVoz, bpm: 
     comp.attack.value = 0.005;
     comp.release.value = 0.12;
 
-    if (r.forca > 0) ligar(saturador(ctx, r.forca));
+    if (r.forca > 0) saturar(r.forca);
   }
+  if (take.distorcao > 0) saturar(1 + take.distorcao * 11);
 
   // Sinal direto.
   fim.connect(saida);
@@ -173,7 +208,7 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, preset: PresetVoz, bpm: 
   // Reverb: uma cópia da voz passa pela "sala" e volta somada.
   const mandadaReverb = ctx.createGain();
   const sala = ctx.createConvolver();
-  sala.buffer = impulsoDeSala(ctx);
+  sala.buffer = impulsoDeSala(ctx, take.tamanhoReverb);
   fim.connect(mandadaReverb).connect(sala).connect(saida);
 
   // Delay: uma cópia atrasada, realimentada para repetir e ir sumindo.
@@ -189,5 +224,5 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, preset: PresetVoz, bpm: 
   abafar.connect(realimentacao).connect(atraso);
 
   nos.push(saida, mandadaReverb, sala, mandadaDelay, atraso, realimentacao, abafar);
-  return { entrada, saida, mandadaReverb, mandadaDelay, desligar: () => nos.forEach((n) => n.disconnect()) };
+  return { entrada, saida, mandadaReverb, mandadaDelay, realimentacao, desligar: () => nos.forEach((n) => n.disconnect()) };
 }
