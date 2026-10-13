@@ -19,6 +19,7 @@ export function tempoDoPasso(passo: number, bpm: number, swing: number): number 
 export class RelogioDePassos {
   private timer: number | undefined;
   private proximo = 0;
+  private agendar: ((ate?: number) => void) | undefined;
 
   constructor(
     private ctx: AudioContext,
@@ -29,19 +30,25 @@ export class RelogioDePassos {
     this.parar();
     this.proximo = Math.max(0, Math.ceil(desde / duracaoDoPasso(bpm) - 1e-6));
     const JANELA = 0.12;
-    const agendar = () => {
+    const agendar = (ate?: number) => {
       while (this.proximo < totalDePassos) {
         const quando = t0 + tempoDoPasso(this.proximo, bpm, swing) - desde;
-        if (quando > this.ctx.currentTime + JANELA) break;
+        if (ate === undefined ? quando > this.ctx.currentTime + JANELA : quando >= ate - 1e-4) break;
         if (quando >= this.ctx.currentTime - 0.01) this.aoPasso(this.proximo, quando);
         this.proximo++;
       }
     };
     agendar();
-    this.timer = window.setInterval(agendar, 25);
+    this.agendar = agendar;
+    this.timer = window.setInterval(() => agendar(), 25);
   }
 
-  parar() {
+  /**
+   * Para o relógio. Com `ate`, antes de parar agenda os passos que ainda
+   * caem antes daquele instante, para a música não perder a última nota.
+   */
+  parar(ate?: number) {
+    if (ate !== undefined && this.timer !== undefined) this.agendar?.(ate);
     if (this.timer !== undefined) window.clearInterval(this.timer);
     this.timer = undefined;
   }

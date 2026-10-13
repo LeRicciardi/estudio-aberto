@@ -1,13 +1,14 @@
 // Página Notas: 808 e melodia em grade de notas.
 
 import { INSTRUMENTOS } from '../engine/synths.ts';
+import { fatiar } from '../engine/tempo-e-fatias.ts';
 import { engine, estado, id, mudou } from '../estado.ts';
 import { type InstrumentoId, NOTAS, type Padrao, nomeDoGrau, passosDoPadrao } from '../model/project.ts';
 import { avisar, secNotas } from '../moldura.ts';
 import { guardarAudio } from '../storage.ts';
-import { botao, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
+import { botao, campo, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
-import { abasDePadrao, dimensionar, gradeDeNotas } from './grades.ts';
+import { abasDePadrao, dimensionar, gradeDeNotas, pintavel } from './grades.ts';
 
 /** Trocar o 808 sintetizado por um sample do usuário, afinado pela nota em que foi gravado. */
 export function sample808(): HTMLElement {
@@ -71,6 +72,124 @@ function acordes(padrao: Padrao): HTMLElement {
   );
 }
 
+let modoDeCorte: 'ataques' | 'grade' = 'ataques';
+let quantasFatias = 8;
+
+/**
+ * Prepara o loop do sampler: cria a versão invertida e recalcula os cortes.
+ * Chamado ao importar, ao mudar o jeito de cortar e ao reabrir o projeto.
+ */
+export function prepararSampler(recortar: boolean) {
+  const sp = estado.projeto.sampler;
+  const original = engine.buffers.get(sp?.audioId ?? '');
+  if (!sp || !original) return;
+  const invertido = engine.ctx.createBuffer(original.numberOfChannels, original.length, original.sampleRate);
+  for (let c = 0; c < original.numberOfChannels; c++) invertido.copyToChannel(original.getChannelData(c).slice().reverse(), c);
+  engine.buffers.set(sp.audioId + ':inv', invertido);
+  if (recortar) sp.cortes = fatiar((sp.invertido ? invertido : original).getChannelData(0), original.sampleRate, quantasFatias, modoDeCorte);
+}
+
+/** Sampler: um loop importado vira fatias, e a grade diz qual fatia toca em cada passo. */
+function sampler(padrao: Padrao): HTMLElement {
+  const sp = estado.projeto.sampler;
+  const ajuda = explicacao([
+    'Sampler é a base do boombap e de muito trap: pegar um trecho de música (um loop), cortar em pedaços e tocar os pedaços em outra ordem.',
+    'Cortar por ataques põe cada corte onde uma nota ou batida começa; por grade, divide o loop em partes iguais.',
+    'Cada linha da grade é uma fatia. A fatia toca do corte dela até o próximo. Clique no nome para ouvir.',
+    'Altura sobe ou desce o loop inteiro, mudando também a velocidade, como num toca-discos. Invertido toca de trás para a frente.',
+    'Só use loops que você tem direito de usar: sample sem autorização pode derrubar a música das plataformas.',
+  ]);
+  if (!sp) {
+    const arquivo = h('input', { type: 'file', accept: 'audio/*' });
+    arquivo.onchange = async () => {
+      const f = arquivo.files?.[0];
+      if (!f) return;
+      try {
+        const buffer = await engine.ctx.decodeAudioData(await f.arrayBuffer());
+        if (buffer.duration > 60) return avisar('Loop longo demais para o sampler (máximo de 60 segundos).');
+        const audioId = id();
+        engine.buffers.set(audioId, buffer);
+        estado.projeto.sampler = { audioId, nome: f.name, cortes: [], altura: 0, invertido: false, volume: 0.8 };
+        prepararSampler(true);
+        mudou();
+        desenharBeat();
+        await guardarAudio(audioId, { tipo: 'arquivo', blob: f });
+      } catch {
+        avisar('Não consegui ler esse arquivo de áudio.');
+      }
+    };
+    return h('div', {}, campo('Loop para fatiar (um trecho de música, de até 60 s)', arquivo), ajuda);
+  }
+  const passos = passosDoPadrao(padrao);
+  const fatias = (padrao.fatias ??= Array<number>(passos).fill(-1));
+  const grade = h('div', { className: 'grade notas' });
+  dimensionar(grade, passos);
+  const botoes: HTMLButtonElement[][] = [];
+  const pintar = () => botoes.forEach((linha, f) => linha.forEach((b, s) => b.classList.toggle('ligado', fatias[s] === f)));
+  const loop = engine.buffers.get(sp.audioId + (sp.invertido ? ':inv' : ''));
+  sp.cortes.forEach((corte, f) => {
+    const ouvir = botao(`Fatia ${f + 1}`, () => {
+      if (!loop) return;
+      void engine.ctx.resume();
+      const fonte = engine.ctx.createBufferSource();
+      fonte.buffer = loop;
+      fonte.playbackRate.value = 2 ** (sp.altura / 12);
+      fonte.connect(engine.mixer.barraMelodia);
+      fonte.start(0, corte, (sp.cortes[f + 1] ?? loop.duration) - corte);
+    }, 'nome-da-fatia');
+    grade.append(ouvir);
+    botoes[f] = [];
+    for (let s = 0; s < passos; s++) {
+      const b = h('button', { className: 'passo' + (s % 16 === 0 ? ' tempo-forte compasso-novo' : s % 4 === 0 ? ' tempo-forte' : ''), ariaLabel: `Fatia ${f + 1}, passo ${s + 1}` });
+      pintavel(grade, b, () => (fatias[s] === f ? 0 : 1), (v) => {
+        if (v) fatias[s] = f;
+        else if (fatias[s] === f) fatias[s] = -1;
+        pintar();
+      });
+      botoes[f][s] = b;
+      estado.colunas[s]?.push(b);
+      grade.append(b);
+    }
+  });
+  pintar();
+  const invertido = h('input', { type: 'checkbox', checked: sp.invertido });
+  invertido.onchange = () => {
+    sp.invertido = invertido.checked;
+    prepararSampler(true);
+    mudou();
+    desenharBeat();
+  };
+  const recortar = () => {
+    prepararSampler(true);
+    for (const pad of estado.projeto.padroes) pad.fatias = pad.fatias?.map((f) => (f >= sp.cortes.length ? -1 : f));
+    desenharBeat();
+  };
+  return h('div', {},
+    h('p', { className: 'nota' }, `Loop: ${sp.nome}`),
+    h('div', { className: 'linha' },
+      seletor<'ataques' | 'grade'>('Cortar por', [['ataques', 'Ataques (onde cada som começa)'], ['grade', 'Grade (partes iguais)']], modoDeCorte, (v) => {
+        modoDeCorte = v;
+        recortar();
+      }),
+      seletor('Fatias', [[4, '4'], [8, '8'], [12, '12'], [16, '16']] as [number, string][], quantasFatias, (v) => {
+        quantasFatias = v;
+        recortar();
+      }),
+      deslizante('Altura (semitons)', -12, 12, 1, sp.altura, (v) => { sp.altura = v; }),
+      deslizante('Volume', 0, 1.5, 0.01, sp.volume, (v) => { sp.volume = v; }),
+      h('label', { className: 'caixa' }, invertido, 'Invertido'),
+      botao('Tirar o sampler', () => {
+        delete estado.projeto.sampler;
+        for (const pad of estado.projeto.padroes) delete pad.fatias;
+        mudou();
+        desenharBeat();
+      }, 'perigo'),
+    ),
+    h('div', { className: 'rolagem' }, grade),
+    ajuda,
+  );
+}
+
 export function desenharNotas() {
   if (estado.projeto.beat.fonte === 'arquivo') {
     secNotas.replaceChildren(h('h2', {}, 'Notas'), h('p', { className: 'nota' }, 'Esta página edita o 808 e a melodia de um beat criado aqui. Com um beat importado, ela não é usada.'));
@@ -111,6 +230,8 @@ export function desenharNotas() {
       'As linhas são as notas da escala da música; a de baixo é a nota principal (tônica). Colocar o 808 junto com o bumbo é o ponto de partida mais seguro.',
       'Deslizar: a nota começa na altura da anterior e escorrega até a nova. É a marca do drill e do trap.',
     ]),
+    h('h3', {}, 'Sampler'),
+    sampler(padrao),
     h('h3', {}, 'Melodia'),
     acordes(padrao),
     h('div', { className: 'linha' },

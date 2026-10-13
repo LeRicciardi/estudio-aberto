@@ -137,3 +137,23 @@ export async function desempacotarProjeto(texto: string): Promise<Project> {
   }
   return normalizar(arquivo.projeto);
 }
+
+/**
+ * Colaboração sem servidor: lê o arquivo de projeto de um parceiro e traz
+ * as vozes dele para o projeto aberto, mantendo as suas. Devolve quantas entraram.
+ */
+export async function juntarVozes(texto: string, p: Project, sufixo: string): Promise<number> {
+  const arquivo = JSON.parse(texto) as ArquivoDeProjeto;
+  if (arquivo.formato !== 'estudio-aberto') throw new Error('Arquivo de projeto inválido');
+  const deles = normalizar(arquivo.projeto);
+  let quantas = 0;
+  for (const take of deles.takes) {
+    const audio = arquivo.audios[take.audioId];
+    if (!audio || audio.tipo !== 'pcm' || p.takes.some((t) => t.id === take.id)) continue;
+    const blob = await (await fetch(audio.dados)).blob();
+    await guardarAudio(take.audioId, { tipo: 'pcm', taxa: audio.taxa, amostras: new Float32Array(await blob.arrayBuffer()) });
+    p.takes.push({ ...take, nome: `${take.nome} (${sufixo})`, naMontagem: false });
+    quantas++;
+  }
+  return quantas;
+}

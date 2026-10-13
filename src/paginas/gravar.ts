@@ -22,6 +22,68 @@ export function marcarGravacao(ligada: boolean) {
 }
 
 /** Começa ou termina uma gravação. Com `refazer`, grava de novo o trecho daquele take. */
+/**
+ * Gravação em laço: um trecho de alguns compassos se repete e cada volta
+ * vira um take. `voltas` guarda o instante (relógio de áudio) em que cada
+ * volta começou, para depois cortar a gravação nos lugares certos.
+ */
+const laco = { compassos: Number(localStorage.getItem('estudio-aberto:laco')) || 0, inicio: 0, fim: 0, voltas: [] as number[], timer: 0, virando: false };
+
+function vigiarLaco() {
+  laco.inicio = estado.cursor;
+  laco.fim = estado.cursor + (laco.compassos * 4 * 60) / estado.projeto.bpm;
+  laco.voltas = [engine.t0];
+  laco.timer = window.setInterval(() => {
+    const resta = laco.fim - engine.posicao();
+    if (!estado.gravando || laco.virando || resta > 0.15) return;
+    // Perto do fim do trecho: agenda a próxima volta para começar exatamente quando esta acabar.
+    laco.virando = true;
+    void engine.tocar(projetoParaTocar(), laco.inicio, undefined, Math.max(0, resta - 0.06), true).then(() => {
+      laco.voltas.push(engine.t0);
+      laco.virando = false;
+    });
+  }, 20);
+}
+
+/** Corta a gravação contínua em um take por volta. Só o último fica ouvindo. */
+async function terminarLaco(g: { amostras: Float32Array; taxa: number; inicio: number }) {
+  window.clearInterval(laco.timer);
+  const latencia = (estado.projeto.latenciaMs ?? latenciaEstimada()) / 1000;
+  const fimDaGravacao = g.inicio + g.amostras.length / g.taxa;
+  const novos: { take: Take; amostras: Float32Array }[] = [];
+  laco.voltas.forEach((comeco, k) => {
+    const fim = Math.min(laco.voltas[k + 1] ?? fimDaGravacao, fimDaGravacao);
+    // A voz chega atrasada pelo microfone: o corte anda o mesmo tanto.
+    const de = Math.max(0, Math.round((comeco - g.inicio + latencia) * g.taxa));
+    const ate = Math.min(g.amostras.length, Math.round((fim - g.inicio + latencia) * g.taxa));
+    if (ate - de < g.taxa) return;
+    const take = novoTake(id(), `Take ${estado.projeto.takes.length + novos.length + 1} (volta ${k + 1})`, id(), laco.inicio, estado.projeto.voz);
+    aplicarTimbre(take, take.preset);
+    take.mudo = true;
+    novos.push({ take, amostras: g.amostras.slice(de, ate) });
+  });
+  laco.voltas = [];
+  if (!novos.length) {
+    void desenharGravar();
+    return avisar('Gravação curta demais, nada foi salvo.');
+  }
+  novos[novos.length - 1].take.mudo = false;
+  for (const { take, amostras } of novos) {
+    const buffer = engine.ctx.createBuffer(1, amostras.length, g.taxa);
+    buffer.copyToChannel(amostras, 0);
+    engine.buffers.set(take.audioId, buffer);
+    estado.projeto.takes.push(take);
+  }
+  mudou();
+  desenharVozes();
+  void desenharGravar();
+  avisar(`${novos.length} takes gravados, um por volta. O último está ouvindo; os outros ficaram mudos. Em Voz → Montagem dá para juntar o melhor de cada um.`);
+  for (const { take, amostras } of novos) {
+    await guardarAudio(take.audioId, { tipo: 'pcm', taxa: g.taxa, amostras });
+    void reafinar(take);
+  }
+}
+
 export async function alternarGravacao(refazer?: Take) {
   if (estado.gravando) return terminarGravacao();
   parar();
@@ -43,6 +105,7 @@ export async function alternarGravacao(refazer?: Take) {
   // Contagem: um compasso de estalos para a pessoa entrar no tempo.
   const espera = prefs.contagem ? engine.contar(estado.projeto.bpm) : 0;
   await engine.tocar(projetoParaTocar(), estado.cursor, undefined, espera);
+  if (laco.compassos && !refazer) vigiarLaco();
   void desenharGravar();
 }
 
@@ -58,8 +121,9 @@ export async function terminarGravacao() {
   marcarGravacao(false);
   engine.parar();
   botaoTocar.textContent = '▶ Tocar';
-  estado.cursor = desde;
-  engine.desde = desde;
+  estado.cursor = laco.voltas.length ? laco.inicio : desde;
+  engine.desde = estado.cursor;
+  if (laco.voltas.length) return terminarLaco(g);
 
   // O som que você ouviu saiu atrasado da placa, e sua voz chegou atrasada
   // pelo microfone. Descontar esse atraso alinha o take com o beat.
@@ -215,7 +279,14 @@ export async function desenharGravar() {
       campo('Trazer uma voz já gravada (WhatsApp, gravador do celular)', arquivoDeVoz),
     ),
     ...ambiente.map((a) => h('p', { className: 'nota alerta' }, a)),
-    h('div', { className: 'linha' }, h('label', { className: 'caixa' }, contagem, 'Contagem de 4 antes de gravar'), escolha),
+    h('div', { className: 'linha' },
+      h('label', { className: 'caixa' }, contagem, 'Contagem de 4 antes de gravar'),
+      seletor('Gravar em laço', [[0, 'Desligado'], [2, 'Repetir 2 compassos'], [4, 'Repetir 4 compassos'], [8, 'Repetir 8 compassos']] as [number, string][], laco.compassos, (v) => {
+        laco.compassos = v;
+        localStorage.setItem('estudio-aberto:laco', String(v));
+      }),
+      escolha,
+    ),
     ...lista,
     h('h3', {}, 'Voz fora do tempo?'),
     h('p', { className: 'nota' }, 'Todo aparelho atrasa o som um pouco. Fone Bluetooth atrasa muito e de forma irregular: prefira fone com fio para gravar.'),
@@ -239,6 +310,7 @@ export async function desenharGravar() {
     explicacao([
       'Contagem: quatro estalos no andamento da música antes de o beat entrar, para você começar no tempo.',
       'Nível do microfone: enquanto grava, a barra deve ficar no meio. Vermelha quer dizer que a voz está estourando.',
+      'Gravar em laço: o trecho escolhido se repete sem parar e cada volta vira um take. Cante várias vezes seguidas, pare, e depois escolha o melhor de cada volta na Montagem.',
       'Gravar de novo: regrava a partir do mesmo ponto. O take antigo fica mudo, não é apagado.',
     ]),
   );

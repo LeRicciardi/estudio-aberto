@@ -54,6 +54,10 @@ conferir('transpor -5 semitons', Math.abs(cents(abaixo, 220 * 2 ** (-5 / 12))) <
 const terca = pitchMedio(afinar(voz(220, 1.5), TAXA, { tom: 9, escala: 'menor', velocidade: 0, graus: 2 }));
 conferir('harmonia uma terça acima', Math.abs(cents(terca, 261.63)) < 12, `${terca.toFixed(2)} Hz`);
 
+// Beat 30 cents acima do padrão: o Lá do beat é 223,85 Hz, e a voz deve ir para lá.
+const fora = pitchMedio(afinar(voz(226, 1.5), TAXA, { tom: 9, escala: 'menor', velocidade: 0, referencia: 30 }));
+conferir('tune acompanha beat fora da afinação padrão', Math.abs(cents(fora, 220 * 2 ** (30 / 1200))) < 8, `${fora.toFixed(2)} Hz`);
+
 // Nota já afinada não pode ser alterada, e silêncio continua silêncio.
 const certo = voz(220, 1);
 const y = afinar(certo, TAXA, { tom: 9, escala: 'menor', velocidade: 0 });

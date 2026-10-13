@@ -21,7 +21,7 @@ Abra o endereço que aparecer (por padrão `http://localhost:5173`). Use fone de
 npm test
 ```
 
-Roda os testes do motor sem navegador: tune, limitador, medidor LUFS, medição de atraso, análise de BPM e tom, redução de ruído, gate, nivelamento, de-esser, espaço para a voz, diagnóstico da mix, etiquetas, zip e conferência do arquivo.
+Roda os testes do motor sem navegador: tune, limitador, medidor LUFS, medição de atraso, análise de BPM e tom, redução de ruído, gate, nivelamento, de-esser, espaço para a voz, diagnóstico da mix, etiquetas, zip, conferência do arquivo, andamento, corte de loops e afinação.
 
 ```bash
 npm run publicar
@@ -36,16 +36,16 @@ A tela é organizada como uma estação de trabalho: barra de transporte no topo
 | Página | O que faz |
 |---|---|
 | Estilo | Cartões de gênero com prévia: boombap, trap, plug, love song, drill, hard/trash, funk, mandelão, bruxaria. Cada um traz andamento, balanço, kit, timbre de voz e padrão de partida |
-| Beat | Grade de bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 14 samples prontos ou samples próprios; ou importação de um beat pronto, com sugestão de BPM e tom |
-| Notas | 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com 5 instrumentos, tudo preso à escala da música |
+| Beat | Grade de bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 20 samples prontos ou samples próprios; três volumes por nota e ajuste de volume, lado e balanço por som; ou importação de um beat pronto, com sugestão de BPM e tom |
+| Notas | Sampler (loop cortado em fatias que a grade dispara), 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com 5 instrumentos, tudo preso à escala da música |
 | Arranjo | Linha do tempo com os padrões em sequência e a forma de onda de cada voz; trechos com nome, partes mudas e virada; estrutura de música pronta |
 | Letra | Letra presa aos compassos do beat (uma linha por compasso), com sílabas aproximadas; aparece na tela e acompanha a música ao gravar |
-| Gravar | Teste do lugar de gravação (ruído e eco), importação de voz já gravada (WhatsApp, gravador), gravação em PCM sem compressão, contagem de 4, medidor e escolha do microfone, regravar um trecho, medição do atraso do aparelho, aviso de voz estourada ou baixa |
+| Gravar | Gravação em laço (cada volta vira um take), teste do lugar de gravação (ruído e eco), importação de voz já gravada (WhatsApp, gravador), gravação em PCM sem compressão, contagem de 4, medidor e escolha do microfone, regravar um trecho, medição do atraso do aparelho, aviso de voz estourada ou baixa |
 | Voz | Uma tela por ferramenta, com botões giratórios: afinação (tune), equalizador com curva, compressor com medidor de redução, espaço (reverb, delay, dobra estéreo), caráter (timbre, distorção, telefone), limpeza (redução de ruído, gate, nivelamento por frase e de-esser) e edição (aparar, fades, ganho). "Ajustar ao meu take" mede a gravação e regula tudo; há compressão dupla e paralela, harmonia automática, eco só no fim da frase e papéis de principal, dobra e adlib. Montagem do melhor de cada take, comparação com e sem efeitos e conferência do equilíbrio com o beat |
 | Mixer | Uma faixa por canal (bateria, 808, melodia, beat, cada voz, master) com medidor, volume, lado e mudo. O beat abre espaço sozinho quando a voz entra |
 | Master | Acabamento (compressor de cola, ganho, limitador), equalizador de 3 bandas, largura do estéreo, volume final em LUFS; diagnóstico da mix, que mede, explica e corrige; escuta em mono e em caixa de celular; exportação em WAV, MP3, acapella e instrumental, com BPM e tom no nome do arquivo |
-| Lançar | Dados da música, ficha da licença do beat, conferência do áudio e da capa, pacote .zip com WAV, MP3 com etiquetas, acapella, instrumental, versão para DJ e faixas separadas |
-| Projeto | Salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
+| Lançar | Dados da música, ficha da licença do beat, conferência do áudio e da capa, pacote .zip com WAV, MP3 com etiquetas, acapella, instrumental, versão para DJ, versão limpa, versão em outro andamento e faixas separadas; vídeo vertical para divulgar |
+| Projeto | Enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
 
 A **tela simples** mostra só Estilo, Beat, Letra, Gravar, Voz, Master, Lançar e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
 
@@ -64,6 +64,7 @@ src/
     vocalChain.ts       Cadeia de voz: equalizador, compressor, saturação, dobra, reverb, delay
     limpeza.ts          Redução de ruído, gate, nivelamento por frase e de-esser
     fft.ts              Transformada de Fourier
+    tempo-e-fatias.ts   Andamento sem mudar o tom, corte de loops e medição de afinação
     entrega.ts          Etiquetas ID3, zip e conferência do arquivo final
     tune.ts             Tune: detecção de pitch (YIN) e correção (TD-PSOLA)
     tune.worker.ts      Limpeza, tune e análise fora da thread da tela
@@ -128,7 +129,8 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 
 - A sugestão de BPM e tom do beat é uma estimativa: foi testada com sinais sintéticos, não com um conjunto de beats reais. O BPM pode sair na metade ou no dobro, e por isso as duas opções são oferecidas.
 - O teclado MIDI foi escrito sem um controlador para testar, e não funciona no Safari nem no iPhone. Não há suporte a plugins (VST, CLAP).
-- A velocidade de um beat importado muda também o tom; mudar só o andamento ainda não é possível.
+- Com o aplicativo instalado no celular, ele aparece no "compartilhar" para receber áudio; isso foi testado no computador, não em um celular.
+- O vídeo vertical sai em MP4 só nos navegadores que gravam MP4; nos outros sai em WebM.
 
 - O tune é aplicado depois da gravação, não ao vivo durante o canto. É uma escolha: no navegador, efeito ao vivo aumenta o atraso.
 - Os modelos de funk, mandelão e bruxaria são aproximações e precisam ser corrigidos por quem é da cena.

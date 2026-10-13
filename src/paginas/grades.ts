@@ -8,7 +8,7 @@ import { botao, h } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
 
 /** Células das grades agrupadas por passo, para acender a coluna que está tocando. */
-export const ROTULO_DO_PASSO = ['', '', '2', '3', '4', ''];
+export const ROTULO_DO_PASSO = ['', '', '2', '3', '4', '', '!'];
 
 /**
  * Pintar arrastando o mouse: o quadrado onde o botão desceu define o valor
@@ -61,7 +61,7 @@ export function gradeDeBateria(): HTMLElement {
       const b = h('button', { ariaLabel: `${lane.nome}, passo ${i + 1}` });
       const pintar = () => {
         const v = padrao.bateria[lane.id][i];
-        b.className = 'passo' + (v ? ' ligado' : '') + (v === 5 ? ' fraco' : '') + classeDoPasso(i);
+        b.className = 'passo' + (v ? ' ligado' : '') + (v === 5 ? ' fraco' : '') + (v === 6 ? ' forte' : '') + classeDoPasso(i);
         b.textContent = ROTULO_DO_PASSO[v];
       };
       pintavel(grade, b, () => (padrao.bateria[lane.id][i] === estado.pincel ? 0 : estado.pincel), (v) => {

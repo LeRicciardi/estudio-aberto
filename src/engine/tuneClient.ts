@@ -30,7 +30,13 @@ export const processarEmSegundoPlano = (amostras: Float32Array, taxa: number, op
 export interface AnaliseDoBeat {
   bpm: ReturnType<typeof detectarBpm>;
   tom: ReturnType<typeof detectarTom>;
+  /** Quantos cents o beat está fora da afinação padrão, ou null. */
+  cents: number | null;
 }
 
 export const analisarEmSegundoPlano = (amostras: Float32Array, taxa: number) =>
   pedir<AnaliseDoBeat>({ tipo: 'analisar', taxa }, amostras);
+
+/** Muda o andamento sem mudar o tom, fora da thread da tela. `canais` são copiados. */
+export const esticarEmSegundoPlano = (canais: Float32Array[], taxa: number, fator: number) =>
+  pedir<Float32Array[]>({ tipo: 'esticar', taxa, fator, canais: canais.map((c) => c.slice()) }, new Float32Array(1));

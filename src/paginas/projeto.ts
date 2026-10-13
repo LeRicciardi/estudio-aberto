@@ -4,8 +4,8 @@ import { abrirDeArquivo, restaurarAudio, salvarEmArquivo } from '../arquivo.ts';
 import { ATALHOS } from '../atalhos.ts';
 import { type EventoDeInstalacao, engine, estado, mudou } from '../estado.ts';
 import { novoProjeto } from '../model/generos.ts';
-import { secProjeto } from '../moldura.ts';
-import { abrirVersao, apagarAudio, guardarVersao, listarVersoes } from '../storage.ts';
+import { avisar, secProjeto } from '../moldura.ts';
+import { abrirVersao, apagarAudio, empacotarProjeto, guardarVersao, juntarVozes, listarVersoes } from '../storage.ts';
 import { desenharTudo, parar } from '../transporte.ts';
 import { botao, campo, h } from '../ui/controles.ts';
 
@@ -29,8 +29,29 @@ async function desenharVersoes() {
   )));
 }
 
+/** Usa o "compartilhar" do aparelho (WhatsApp, e-mail...) quando existe; senão, baixa o arquivo. */
+async function enviarProjeto() {
+  const arquivo = new File([await empacotarProjeto(estado.projeto)], `${estado.projeto.nome || 'projeto'}.estudio.json`, { type: 'application/json' });
+  if (navigator.canShare?.({ files: [arquivo] })) await navigator.share({ files: [arquivo], title: estado.projeto.nome }).catch(() => {});
+  else await salvarEmArquivo();
+}
+
 export function desenharProjeto() {
   void desenharVersoes();
+  const parceiro = h('input', { type: 'file', accept: '.json,application/json' });
+  parceiro.onchange = async () => {
+    const arquivo = parceiro.files?.[0];
+    if (!arquivo) return;
+    try {
+      const quantas = await juntarVozes(await arquivo.text(), estado.projeto, 'parceiro');
+      mudou();
+      await restaurarAudio();
+      desenharTudo();
+      avisar(quantas ? `${quantas} voz(es) do parceiro entraram no projeto.` : 'Esse arquivo não trouxe nenhuma voz nova.');
+    } catch {
+      avisar('Esse arquivo não é um projeto do Estúdio Aberto.');
+    }
+  };
   const abrir = h('input', { type: 'file', accept: '.json,application/json' });
   abrir.onchange = () => abrir.files?.[0] && void abrirDeArquivo(abrir.files[0]);
   secProjeto.replaceChildren(
@@ -39,6 +60,12 @@ export function desenharProjeto() {
     h('div', { className: 'linha' },
       botao('Salvar projeto em arquivo', () => void salvarEmArquivo()),
       campo('Abrir projeto de um arquivo', abrir),
+    ),
+    h('h3', {}, 'Trabalhar com outra pessoa'),
+    h('p', { className: 'nota' }, 'Mande o arquivo do projeto para o parceiro. Ele abre, grava a parte dele e devolve o arquivo. Aqui você junta as vozes dele às suas, sem perder nada do seu lado.'),
+    h('div', { className: 'linha' },
+      botao('Enviar o projeto', () => void enviarProjeto()),
+      campo('Juntar as vozes do arquivo de um parceiro', parceiro),
     ),
     h('h3', {}, 'Versões'),
     h('p', { className: 'nota' }, 'Guarde um retrato da música antes de mexer em algo arriscado. Cada exportação também guarda uma versão. Ficam neste navegador, até 15.'),

@@ -31,28 +31,47 @@ Consolidação de seis pesquisas feitas em outubro de 2026, cada uma com um esco
 | Lançar | Dados da música e ficha da licença do beat; conferência do áudio (pico, volume, silêncio, duração) e da capa; pacote .zip com WAV (16 ou 24 bits), MP3 com BPM e tom gravados no arquivo, acapella, instrumental, versão para DJ com intro e saída, faixas separadas desde o compasso 1, ficha e letra |
 | Base | Versões do projeto; teclado MIDI (tocar e escrever na grade) |
 
-## O que ainda falta
+## Os onze itens da rodada seguinte
 
-Em ordem de valor para o artista:
+| Item | Situação |
+|---|---|
+| Regravar em laço | Feito: o trecho de 2, 4 ou 8 compassos se repete e cada volta vira um take |
+| Sampler | Feito: loop importado, corte por ataques ou em grade, 4 a 16 fatias, altura, invertido; a grade dispara as fatias |
+| Volume, lado e altura por nota; balanço por som | Feito em parte: volume, lado, balanço e altura **por som**, e três volumes **por nota** (forte, normal, fraco). Volume contínuo e lado por nota não foram feitos |
+| Andamento sem mudar o tom | Feito, com algoritmo próprio (WSOLA). Soa bem entre 75% e 135% |
+| Vídeo vertical | Feito: 15 ou 30 s com título, artista, barras de som e a letra da vez. Sai em MP4 onde o navegador grava MP4, senão em WebM |
+| Receber pelo "compartilhar" do celular | Feito: com o aplicativo instalado, o áudio compartilhado vira take (ou beat, se for longo) |
+| Versão limpa e versões em outros andamentos | Feito: trechos da voz silenciados por tempo informado; versão em 130, 150 ou 170 BPM para beat criado aqui |
+| Redução de ruído por rede neural | **Não feito.** O pacote candidato (RNNoise em WebAssembly) não declara licença no registro, e o DeepFilterNet pede uma biblioteca de execução de vários megabytes. Segue a redução de ruído própria, por subtração espectral |
+| Aviso de beat fora da afinação padrão | Feito: mede os cents de desvio e o tune passa a acompanhar o beat |
+| Biblioteca de sons maior | Feito em parte: mais seis percussões em domínio público (cowbell, agogô, chocalho, pandeiro, clave, cabasa). Não há 808 nem bateria eletrônica com licença verificável |
+| Colaboração em tempo real | **Não feito em tempo real.** Feito o caminho sem servidor: enviar o projeto pelo "compartilhar" e juntar as vozes do arquivo de um parceiro, sem perder as próprias |
 
-1. **Regravar em laço**, empilhando um take por volta.
-2. **Sampler**: fatiar um loop por transiente ou grade, tocar as fatias, inverter, mudar a altura. É a base do boombap e do "loop primeiro" do trap.
-3. **Volume, lado e altura por nota**, e balanço (swing) diferente para cada som.
-4. **Mudar o andamento de um beat importado sem mudar o tom** (hoje a velocidade muda os dois). Candidata: `signalsmith-stretch`, MIT.
-5. **Vídeo vertical curto** com forma de onda e letra, para Reels, TikTok e Canvas.
-6. **Receber áudio pelo "compartilhar" do celular** direto no aplicativo instalado.
-7. **Versão limpa** (silenciar palavras marcadas) e versões em vários andamentos para DJs de funk.
-8. **Redução de ruído por rede neural** (DeepFilterNet), baixada sob demanda, para gravações muito ruins.
-9. **Aviso de beat fora da afinação padrão**, que faz o tune puxar para notas erradas.
-10. **Biblioteca de sons maior**, só com licença de domínio público verificada.
-11. **Colaboração em tempo real.**
+## O que as pesquisas trouxeram e ainda não entrou
+
+- **Comparar com uma música de referência**, com o volume igualado.
+- **Equalização do beat separando centro e lados** (mid-side) e equalizador dinâmico contra aspereza.
+- **Tirar eco de sala** de uma gravação (de-reverb).
+- **Efeito de meia velocidade e parada de fita** (half-time, tape stop).
+- **Volume contínuo, lado e altura por nota**, probabilidade e humanização; arpejo e dedilhado.
+- **Áudio para notas** (cantarolar a melodia ou o 808).
+- **Rimas e sílabas poéticas em português**; histórico de versões de cada verso.
+- **Comentários com marcação de tempo** para receber opinião sobre a música.
+- **Etiquetas em WAV e AIFF** e cabeçalho que alinhe o MP3 ao primeiro tempo em todos os programas de DJ.
+- **Regravar em laço com pré-escuta** (alguns segundos antes do ponto) em vez de contagem.
+- **Desafios e lições curtas** dentro do estúdio.
+- **Acessibilidade para leitor de tela**, que não foi auditada.
+- **Medição de desempenho em celular de entrada.**
+
+Ficam de fora por decisão: separação de voz e instrumentos por IA, geração de música por IA e colaboração em tempo real (ver abaixo).
 
 ## O que não foi verificado
 
-- Nada foi ouvido por uma pessoa: todos os testes são medições. Timbres, tune, harmonia e redução de ruído precisam do ouvido de quem usa.
-- Gravação com microfone real, celular de entrada e iPhone continuam sem teste.
+- Nada foi ouvido por uma pessoa: todos os testes são medições. Timbres, tune, harmonia, sampler, esticamento e redução de ruído precisam do ouvido de quem usa.
+- Gravação com microfone real, celular de entrada e iPhone continuam sem teste. A gravação em laço foi testada com microfone simulado.
 - O teclado MIDI foi escrito sem um controlador ligado para testar.
-- Os limiares do diagnóstico, do "ajustar ao meu take" e do teste de ambiente foram calibrados com sinais sintéticos.
+- O recebimento pelo "compartilhar" foi testado enviando o arquivo ao service worker no computador, não a partir de um celular com o aplicativo instalado.
+- Os limiares do diagnóstico, do "ajustar ao meu take", do teste de ambiente e da detecção de afinação foram calibrados com sinais sintéticos.
 
 ## Decisões tomadas
 

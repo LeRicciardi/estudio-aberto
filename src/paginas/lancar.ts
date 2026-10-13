@@ -2,10 +2,11 @@
 // distribuidoras pedem e o pacote de arquivos para entregar.
 
 import { camelot } from '../engine/diagnostico.ts';
-import { exportarMix, paraMp3, paraWav, type Exportacao } from '../engine/engine.ts';
-import { conferirAudio, etiquetasId3, tomCurto, zip, type ItemDaConferencia } from '../engine/entrega.ts';
+import { type Exportacao, exportarMix, paraMp3, paraWav } from '../engine/engine.ts';
+import { type ItemDaConferencia, conferirAudio, etiquetasId3, tomCurto, zip } from '../engine/entrega.ts';
+import { esticarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { av, engine, estado, mudou } from '../estado.ts';
-import { NOTAS, STEPS, type Project } from '../model/project.ts';
+import { NOTAS, type Project, STEPS } from '../model/project.ts';
 import { avisar, secLancar } from '../moldura.ts';
 import { baixar, botao, campo, explicacao, h, seletor } from '../ui/controles.ts';
 
@@ -14,6 +15,7 @@ let capa: ItemDaConferencia | null = null;
 let trabalhando = false;
 let bits: 16 | 24 = 16;
 let introDj = 8;
+let outroBpm = 0;
 
 const dados = () => estado.projeto.lancamento!;
 
@@ -63,6 +65,155 @@ function versaoDj(compassos: number): Project {
   return { ...p, arranjo: [ponta, ...p.arranjo, { ...ponta }], takes: p.takes.map((t) => ({ ...t, inicio: t.inicio + desloca })), montagem: { ...p.montagem, ligada: false } };
 }
 
+/** Lê "12.3-12.9, 45-45.6" como uma lista de trechos, em segundos. */
+function trechosDaLimpa(): [number, number][] {
+  return (estado.projeto.limpa ?? '').split(/[,;]/).map((t) => t.trim().split('-').map(Number)).filter((t): t is [number, number] => t.length === 2 && t[0] >= 0 && t[1] > t[0]);
+}
+
+type Buffers = Map<string, AudioBuffer>;
+
+/** Cópia de um buffer com uma transformação aplicada a cada canal. */
+function copiar(original: AudioBuffer, canais: Float32Array[]): AudioBuffer {
+  const copia = engine.ctx.createBuffer(canais.length, canais[0].length, original.sampleRate);
+  canais.forEach((c, i) => copia.copyToChannel(c, i));
+  return copia;
+}
+
+/**
+ * Versão limpa: os trechos marcados (palavrões) ficam em silêncio só na voz;
+ * o beat continua. Devolve os áudios com as vozes já silenciadas.
+ */
+function buffersLimpos(): Buffers {
+  const buffers: Buffers = new Map(engine.buffers);
+  const trechos = trechosDaLimpa();
+  for (const take of estado.projeto.takes) {
+    for (const chave of [take.audioId, take.audioId + ':tune', take.audioId + ':harm']) {
+      const buf = buffers.get(chave);
+      if (!buf) continue;
+      const dados = buf.getChannelData(0).slice();
+      const rampa = Math.round(buf.sampleRate * 0.01);
+      for (const [de, ate] of trechos) {
+        const a = Math.max(0, Math.round((de - take.inicio) * buf.sampleRate));
+        const b = Math.min(dados.length, Math.round((ate - take.inicio) * buf.sampleRate));
+        for (let i = a; i < b; i++) dados[i] *= i - a < rampa ? 1 - (i - a) / rampa : b - i < rampa ? 1 - (b - i) / rampa : 0;
+      }
+      buffers.set(chave, copiar(buf, [dados]));
+    }
+  }
+  return buffers;
+}
+
+/**
+ * Versão em outro andamento (para DJs que tocam em 130, 150 ou 170). O beat
+ * criado aqui é simplesmente tocado no novo BPM; as vozes são esticadas ou
+ * encurtadas sem mudar o tom.
+ */
+async function emOutroAndamento(bpm: number): Promise<{ projeto: Project; buffers: Buffers }> {
+  const p = estado.projeto;
+  const fator = bpm / p.bpm;
+  const buffers: Buffers = new Map(engine.buffers);
+  for (const take of p.takes) {
+    for (const chave of [take.audioId, take.audioId + ':tune', take.audioId + ':harm']) {
+      const buf = buffers.get(chave);
+      if (buf) buffers.set(chave, copiar(buf, await esticarEmSegundoPlano([buf.getChannelData(0)], buf.sampleRate, fator)));
+    }
+  }
+  const takes = p.takes.map((t) => ({ ...t, inicio: t.inicio / fator, edicao: { ...t.edicao, ini: t.edicao.ini / fator, fim: t.edicao.fim / fator } }));
+  return { projeto: { ...p, bpm, takes, montagem: { ...p.montagem, ligada: false } }, buffers };
+}
+
+/**
+ * Vídeo vertical curto (para Reels, TikTok, Shorts e Canvas): a música com
+ * barras de som animadas, título e a linha da letra que está sendo cantada.
+ * É gravado em tempo real, então leva o tempo do próprio trecho.
+ */
+async function gerarVideo(segundos: number) {
+  if (!('MediaRecorder' in window)) return avisar('Este navegador não grava vídeo.');
+  trabalhando = true;
+  desenharLancar();
+  try {
+    const p = estado.projeto;
+    avisar('Preparando o vídeo...');
+    const { audio } = await exportarMix(p, engine.buffers, 'tudo');
+    const inicio = Math.min(estado.cursor, Math.max(0, audio.duration - segundos));
+    const dados = audio.getChannelData(0);
+    const tela = h('canvas', { width: 720, height: 1280 });
+    const g = tela.getContext('2d')!;
+    const ctx = new AudioContext();
+    const fonte = ctx.createBufferSource();
+    fonte.buffer = audio;
+    const saida = ctx.createMediaStreamDestination();
+    fonte.connect(saida);
+    const fluxo = tela.captureStream(30);
+    fluxo.addTrack(saida.stream.getAudioTracks()[0]);
+    const tipo = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    const gravador = new MediaRecorder(fluxo, { mimeType: tipo, videoBitsPerSecond: 4_000_000 });
+    const pedacos: Blob[] = [];
+    gravador.ondataavailable = (e) => pedacos.push(e.data);
+    const pronto = new Promise((ok) => (gravador.onstop = ok));
+    const linhas = p.letra.texto.split('\n');
+    const compasso = (4 * 60) / p.bpm;
+    const BARRAS = 36;
+    const t0 = ctx.currentTime + 0.1;
+    fonte.start(t0, inicio, segundos);
+    gravador.start();
+    avisar(`Gravando o vídeo (${segundos} s). Deixe esta aba aberta e visível.`);
+    await new Promise<void>((ok) => {
+      // Temporizador em vez de requestAnimationFrame: com a aba em segundo
+      // plano o desenho fica lento, mas a gravação termina do mesmo jeito.
+      const quadro = () => {
+        const t = ctx.currentTime - t0;
+        if (t >= segundos) {
+          window.clearInterval(relogio);
+          return ok();
+        }
+        const pos = inicio + Math.max(0, t);
+        g.fillStyle = '#14181c';
+        g.fillRect(0, 0, 720, 1280);
+        // Barras: o volume de cada pedacinho do meio segundo em volta do instante atual.
+        for (let b = 0; b < BARRAS; b++) {
+          const centro = Math.floor((pos - 0.25 + (b / BARRAS) * 0.5) * audio.sampleRate);
+          let pico = 0;
+          for (let i = Math.max(0, centro - 300); i < Math.min(dados.length, centro + 300); i += 6) pico = Math.max(pico, Math.abs(dados[i]));
+          const altura = 20 + pico * 520;
+          g.fillStyle = b % 2 ? '#ff9d2e' : '#ffc27a';
+          g.fillRect(60 + b * 17, 640 - altura / 2, 11, altura);
+        }
+        g.textAlign = 'center';
+        g.fillStyle = '#ffffff';
+        g.font = 'bold 54px system-ui, sans-serif';
+        g.fillText(p.nome.slice(0, 22), 360, 190);
+        g.fillStyle = '#ff9d2e';
+        g.font = '36px system-ui, sans-serif';
+        g.fillText((p.lancamento?.artista ?? '').slice(0, 30), 360, 250);
+        const linha = linhas[Math.floor(pos / compasso) - (p.letra.compasso - 1)]?.trim();
+        if (linha) {
+          g.fillStyle = '#ffffff';
+          g.font = 'bold 40px system-ui, sans-serif';
+          // Quebra a linha da letra em até três partes que caibam na largura.
+          const palavras = linha.split(' ');
+          const partes: string[] = [''];
+          for (const palavra of palavras) {
+            if (g.measureText(`${partes[partes.length - 1]} ${palavra}`).width > 620) partes.push(palavra);
+            else partes[partes.length - 1] = `${partes[partes.length - 1]} ${palavra}`.trim();
+          }
+          partes.slice(0, 3).forEach((parte, i) => g.fillText(parte, 360, 1010 + i * 52));
+        }
+      };
+      const relogio = window.setInterval(quadro, 33);
+    });
+    gravador.stop();
+    await pronto;
+    void ctx.close();
+    baixar(new Blob(pedacos, { type: tipo.split(';')[0] }), `${nomeDoArquivo('Vídeo')}.${tipo.includes('mp4') ? 'mp4' : 'webm'}`);
+    avisar(tipo.includes('mp4') ? 'Vídeo pronto.' : 'Vídeo pronto, em formato WebM. O Instagram e o TikTok pedem MP4: se o seu não aceitar, converta num aplicativo de vídeo do celular.');
+  } catch {
+    avisar('Não consegui gerar o vídeo neste navegador.');
+  }
+  trabalhando = false;
+  desenharLancar();
+}
+
 async function conferir() {
   trabalhando = true;
   desenharLancar();
@@ -83,8 +234,8 @@ async function pacote() {
     const p = estado.projeto;
     const l = dados();
     const arquivos: { nome: string; dados: Uint8Array }[] = [];
-    const wav = async (nome: string, projeto: Project, partes: 'tudo' | 'voz' | 'beat' = 'tudo') => {
-      const r = await exportarMix(projeto, engine.buffers, partes);
+    const wav = async (nome: string, projeto: Project, partes: 'tudo' | 'voz' | 'beat' = 'tudo', buffers: Buffers = engine.buffers) => {
+      const r = await exportarMix(projeto, buffers, partes);
       arquivos.push({ nome, dados: await bytes(paraWav(r.audio, bits)) });
       return r;
     };
@@ -97,6 +248,15 @@ async function pacote() {
     if (p.beat.fonte === 'padrao' && introDj > 0) {
       avisar('Montando o pacote: versão para DJ...');
       await wav(`${nomeDoArquivo(`DJ Intro ${introDj}`)}.wav`, versaoDj(introDj));
+    }
+    if (trechosDaLimpa().length) {
+      avisar('Montando o pacote: versão limpa...');
+      await wav(`${nomeDoArquivo('Clean')}.wav`, p, 'tudo', buffersLimpos());
+    }
+    if (outroBpm && p.beat.fonte === 'padrao' && outroBpm !== p.bpm) {
+      avisar(`Montando o pacote: versão em ${outroBpm} BPM...`);
+      const outra = await emOutroAndamento(outroBpm);
+      await wav(`${nomeDoArquivo(`${outroBpm} BPM`).replace(`[${p.bpm} BPM`, `[${outroBpm} BPM`)}.wav`, outra.projeto, 'tudo', outra.buffers);
     }
     avisar('Montando o pacote: faixas separadas...');
     const partes = [...(p.beat.fonte === 'padrao' ? ['bateria', 'baixo', 'melodia'] : []), ...p.takes.filter((t) => !t.mudo).map((t) => t.id)];
@@ -207,13 +367,25 @@ export function desenharLancar() {
       p.beat.fonte === 'padrao'
         ? seletor('Versão para DJ', [[0, 'Não incluir'], [8, 'Intro e saída de 8 compassos'], [16, 'Intro e saída de 16 compassos']] as [number, string][], introDj, (v) => { introDj = v; })
         : '',
+      p.beat.fonte === 'padrao'
+        ? av(seletor('Versão em outro andamento', [[0, 'Não incluir'], [130, '130 BPM'], [150, '150 BPM'], [170, '170 BPM']] as [number, string][], outroBpm, (v) => { outroBpm = v; }))
+        : '',
     ),
+    av(texto('Versão limpa: trechos da voz a silenciar (em segundos)', p.limpa ?? '', (v) => { p.limpa = v; }, 'Ex.: 12.3-12.9, 45-45.6')),
     montar,
+    h('h3', {}, 'Vídeo para divulgar'),
+    h('div', { className: 'linha' },
+      Object.assign(botao('Vídeo vertical de 15 s', () => void gerarVideo(15)), { disabled: trabalhando }),
+      Object.assign(botao('Vídeo vertical de 30 s', () => void gerarVideo(30)), { disabled: trabalhando }),
+    ),
+    h('p', { className: 'nota' }, 'O vídeo começa de onde a música está parada (use a barra de tempo para escolher o trecho, por exemplo o refrão) e mostra título, artista, barras de som e a letra da vez.'),
     h('p', { className: 'nota' }, `O pacote leva: música em WAV e MP3 (com BPM e tom gravados no arquivo), acapella, instrumental${p.beat.fonte === 'padrao' ? ', versão para DJ' : ''}, cada faixa separada começando no compasso 1, ficha da música e letra.`),
     explicacao([
       'As faixas separadas começam todas no mesmo ponto e têm a mesma duração: quem for mixar só precisa soltar no programa dele.',
       'Acapella e instrumental oficiais valem ouro para DJs, porque a separação automática deles vaza e soa robótica.',
       'A versão para DJ tem alguns compassos só de batida antes e depois da música, onde o DJ mistura a entrada e a saída.',
+      'Versão limpa: informe os segundos de cada palavrão (dá para ver o tempo na barra de transporte) e a voz fica em silêncio só ali. Rádios, DJs de evento e algumas playlists só aceitam a versão limpa.',
+      'Versão em outro andamento: o beat é tocado no novo BPM e as vozes são ajustadas sem mudar o tom. DJs de funk tocam a mesma música em 130, 150 ou 170.',
       'O nome dos arquivos leva BPM e tom na notação Camelot, que os programas de DJ usam para dizer quais músicas combinam.',
     ]),
   );

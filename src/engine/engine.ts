@@ -1,7 +1,7 @@
 // Motor ao vivo: toca o projeto a partir de um ponto, e exporta a mix final.
 
 import {
-  LANES, STEPS, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, localizarPasso, passosDoPadrao, semitonsDoGrau,
+  LANES, STEPS, bufferDoBeat, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, localizarPasso, passosDoPadrao, semitonsDoGrau,
   type Padrao, type PassoLocalizado, type Project, type Take,
 } from '../model/project.ts';
 import { TAXA_DA_CURVA, presencaDaVoz, type TrechoDeVoz } from './espaco.ts';
@@ -56,13 +56,18 @@ function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Bu
       // cada toque um pouco mais forte que o anterior.
       const toques = v >= 2 && v <= 4 ? v : 1;
       const sample = buffers.get(p.samples[id]?.audioId ?? '');
+      const som = p.sons?.[id];
+      const destino = saidaDoSom(ctx, mixer, som?.pan ?? 0);
+      // Balanço próprio do som: atrasa os passos pares além do balanço geral.
+      const inicio = quando + (s % 2 === 1 ? (som?.swing ?? 0) * dur : 0);
       for (let k = 0; k < toques; k++) {
-        const t = quando + (k * dur) / toques;
-        const volume = v === 5 ? 0.35 : toques > 1 ? 0.55 + (0.45 * k) / (toques - 1) : 1;
-        if (sample) tocarSample(ctx, mixer.barraBateria, sample, t, volume);
-        else tocarTambor(ctx, mixer.barraBateria, p.kit, id, t, volume);
+        const t = inicio + (k * dur) / toques;
+        const forca = v === 5 ? 0.35 : v === 6 ? 1.3 : toques > 1 ? 0.55 + (0.45 * k) / (toques - 1) : 1;
+        const volume = forca * (som?.volume ?? 1);
+        if (sample) tocarSample(ctx, destino, sample, t, volume, som?.altura ?? 0);
+        else tocarTambor(ctx, destino, p.kit, id, t, volume);
       }
-      if (id === 'kick' && p.beat.sidechain) mixer.abaixarBaixo(quando);
+      if (id === 'kick' && p.beat.sidechain) mixer.abaixarBaixo(inicio);
     }
   }
   const grau = padrao.baixo[s];
@@ -86,6 +91,15 @@ function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Bu
       tocarBaixo(ctx, mixer.barraBaixo, p.kit, hzDoGrau(p, grau, 'baixo'), quando, de);
     }
   }
+  // Sampler: a fatia do loop marcada neste passo, do corte dela até o próximo.
+  const fatia = padrao.fatias?.[s] ?? -1;
+  const loop = p.sampler && buffers.get(p.sampler.audioId + (p.sampler.invertido ? ':inv' : ''));
+  if (fatia >= 0 && loop && p.sampler && !mudos.melodia) {
+    const cortes = p.sampler.cortes;
+    const de = cortes[fatia];
+    const ate = cortes[fatia + 1] ?? loop.duration;
+    if (de !== undefined && ate > de) tocarSample(ctx, mixer.barraMelodia, loop, quando, p.sampler.volume, p.sampler.altura, de, ate - de);
+  }
   if (!mudos.melodia) {
     padrao.melodia.forEach((linha, g) => {
       if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur);
@@ -100,13 +114,32 @@ function tocarPassoDaMusica(ctx: BaseAudioContext, mixer: Mixer, p: Project, buf
 }
 
 /** Toca um sample do usuário (um som gravado) no lugar do som sintetizado. */
-function tocarSample(ctx: BaseAudioContext, destino: AudioNode, sample: AudioBuffer, t: number, volume: number) {
+function tocarSample(ctx: BaseAudioContext, destino: AudioNode, sample: AudioBuffer, t: number, volume: number, semitons = 0, de = 0, duracao?: number) {
   const s = ctx.createBufferSource();
   s.buffer = sample;
+  // Tocar mais rápido deixa mais agudo: 12 semitons acima é o dobro da velocidade.
+  s.playbackRate.value = 2 ** (semitons / 12);
   const g = ctx.createGain();
   g.gain.value = volume;
   s.connect(g).connect(destino);
-  s.start(t);
+  if (duracao === undefined) {
+    s.start(t);
+  } else {
+    // Fatia de um loop: sai em 5 ms no fim, para o corte não estalar.
+    const real = duracao / s.playbackRate.value;
+    g.gain.setValueAtTime(volume, t + Math.max(0, real - 0.005));
+    g.gain.linearRampToValueAtTime(0, t + real);
+    s.start(t, de, duracao);
+  }
+}
+
+/** Saída para um som da bateria: direto na barra, ou passando por um controle de lado. */
+function saidaDoSom(ctx: BaseAudioContext, mixer: Mixer, pan: number): AudioNode {
+  if (!pan) return mixer.barraBateria;
+  const lado = ctx.createStereoPanner();
+  lado.pan.value = pan;
+  lado.connect(mixer.barraBateria);
+  return lado;
 }
 
 /** Agenda o beat importado e os takes de voz para tocarem a partir de `desde`. */
@@ -173,7 +206,7 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
     fontes.push(s);
   };
 
-  if (partes !== 'voz' && p.beat.fonte === 'arquivo' && p.beat.audioId) tocar(buffers.get(p.beat.audioId), mixer.barraDoBeat, 0);
+  if (partes !== 'voz' && p.beat.fonte === 'arquivo') tocar(bufferDoBeat(p, buffers), mixer.barraDoBeat, 0);
   if (partes === 'beat') return fontes;
   const trecho = duracaoDoTrecho(p);
   for (const take of p.takes) {
@@ -284,8 +317,21 @@ export class Engine {
    * Toca a música a partir de `desde`. Com `padraoEmLoop`, repete só aquele
    * padrão, sem vozes: é o modo de criação do beat.
    */
-  async tocar(p: Project, desde: number, padraoEmLoop?: number, espera = 0) {
-    this.parar();
+  /**
+   * `emenda`: usado na gravação em laço. Em vez de cortar o que está tocando,
+   * deixa soar até o instante em que a nova volta começa, sem buraco entre elas.
+   */
+  async tocar(p: Project, desde: number, padraoEmLoop?: number, espera = 0, emenda = false) {
+    if (emenda) {
+      const virada = this.ctx.currentTime + 0.06 + espera;
+      this.relogio.parar(virada);
+      for (const f of this.fontes) {
+        try { f.stop(virada); } catch { /* já terminou */ }
+      }
+      this.fontes = [];
+    } else {
+      this.parar();
+    }
     await this.ctx.resume();
     this.projeto = p;
     this.padraoEmLoop = padraoEmLoop;

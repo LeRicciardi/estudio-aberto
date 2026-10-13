@@ -1,7 +1,7 @@
 // Página Beat: bateria em grade, kits e samples, ou um beat importado.
 
 import { KITS } from '../engine/synths.ts';
-import { analisarEmSegundoPlano } from '../engine/tuneClient.ts';
+import { analisarEmSegundoPlano, esticarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { av, engine, estado, id, mudou, relogio } from '../estado.ts';
 import { type Escala, type KitId, LANES, type LaneId, NOTAS, PREFIXO_DE_FABRICA, SAMPLES_DE_FABRICA, STEPS, passosDoPadrao, redimensionar } from '../model/project.ts';
 import { avisar, secCanais } from '../moldura.ts';
@@ -71,6 +71,15 @@ function desenharCanais() {
         seletor('Tom do beat', NOTAS.map((n, i) => [i, n] as [number, string]), estado.projeto.tom, (v) => { estado.projeto.tom = v; desenharEstilo(); void reafinarTodos(); }),
         seletor<Escala>('Escala', [['menor', 'Menor'], ['maior', 'Maior']], estado.projeto.escala, (v) => { estado.projeto.escala = v; desenharEstilo(); void reafinarTodos(); }),
       ),
+      deslizante(`Andamento do beat: ${Math.round((beat.andamento ?? 1) * 100)}% (o tom não muda)`, 0.75, 1.35, 0.01, beat.andamento ?? 1, (v) => {
+        // O BPM informado acompanha a mudança.
+        estado.projeto.bpm = Math.round((estado.projeto.bpm * v) / (beat.andamento ?? 1));
+        beat.andamento = v;
+      }, () => {
+        desenharBeat();
+        desenharEstilo();
+        void aplicarAndamento();
+      }),
       av(deslizante(`Velocidade do beat: ${Math.round((beat.velocidade ?? 1) * 100)}% (${Math.round(estado.projeto.bpm)} BPM informado)`, 0.8, 1.25, 0.01, beat.velocidade ?? 1, (v) => { beat.velocidade = v; }, () => {
         desenharBeat();
         reiniciarSeTocando();
@@ -104,7 +113,7 @@ function desenharCanais() {
   apagar.title = emUso(estado.padraoAtual) ? 'Tire o padrão do arranjo antes de apagar' : '';
 
   const pinceis = h('div', { className: 'abas' },
-    ...([[1, 'Normal'], [5, 'Fraco'], [2, 'Rolo 2x'], [3, 'Rolo 3x'], [4, 'Rolo 4x']] as const).map(([v, nome]) =>
+    ...([[1, 'Normal'], [6, 'Forte'], [5, 'Fraco'], [2, 'Rolo 2x'], [3, 'Rolo 3x'], [4, 'Rolo 4x']] as const).map(([v, nome]) =>
       botao(nome, () => {
         estado.pincel = v;
         desenharBeat();
@@ -130,10 +139,11 @@ function desenharCanais() {
     ),
     av(campo('Pincel: o que um clique escreve', pinceis)),
     gradeDeBateria(),
+    av(ajustesDosSons()),
     av(samples()),
     explicacao([
       'Cada linha é um som e cada quadrado é um instante do compasso (16 por compasso). Os quadrados mais claros marcam as 4 batidas.',
-      'Fraco: toca baixinho. Notas fracas entre as fortes dão balanço.',
+      'Forte e fraco: três volumes por nota. Notas fracas entre as fortes dão balanço; um acento no lugar certo dá o "pulo" do ritmo.',
       'Rolo: repete o som 2, 3 ou 4 vezes dentro de um quadrado. É o chimbal acelerado do trap.',
     ]),
     av(h('h3', {}, 'Peso')),
@@ -148,6 +158,48 @@ function desenharCanais() {
     volume,
     espaco,
   );
+}
+
+let somAberto: LaneId = 'hat';
+
+/** Volume, lado, balanço e altura de um som da bateria, um de cada vez. */
+function ajustesDosSons(): HTMLElement {
+  const p = estado.projeto;
+  const som = (p.sons ??= {})[somAberto] ??= { volume: 1, pan: 0, swing: 0, altura: 0 };
+  return h('details', { className: 'explica' },
+    h('summary', {}, 'Ajustar cada som (volume, lado, balanço)'),
+    h('div', { className: 'linha' },
+      seletor<LaneId>('Som', LANES.map((l) => [l.id, l.nome] as [LaneId, string]), somAberto, (v) => {
+        somAberto = v;
+        desenharBeat();
+      }),
+      deslizante('Volume', 0, 1.5, 0.01, som.volume, (v) => { som.volume = v; }),
+      deslizante('Lado (esq. / dir.)', -1, 1, 0.05, som.pan, (v) => { som.pan = v; }),
+      deslizante('Balanço só deste som', 0, 0.5, 0.01, som.swing, (v) => { som.swing = v; }),
+      deslizante('Altura (só em samples)', -12, 12, 1, som.altura, (v) => { som.altura = v; }),
+    ),
+    h('p', {}, 'Chimbal um pouco para um lado e percussão para o outro abrem o beat. No boombap, o chimbal costuma ter mais balanço que o bumbo e a caixa: use o balanço só deste som para isso.'),
+  );
+}
+
+/** Refaz a versão do beat importado com o andamento escolhido, sem mudar o tom. */
+export async function aplicarAndamento() {
+  const beat = estado.projeto.beat;
+  const original = engine.buffers.get(beat.audioId ?? '');
+  const fator = beat.andamento ?? 1;
+  if (!original || !beat.audioId) return;
+  if (fator === 1) {
+    engine.buffers.delete(beat.audioId + ':tempo');
+    return;
+  }
+  avisar('Ajustando o andamento do beat...');
+  const canais = Array.from({ length: original.numberOfChannels }, (_, c) => original.getChannelData(c));
+  const prontos = await esticarEmSegundoPlano(canais, original.sampleRate, fator);
+  const buffer = engine.ctx.createBuffer(prontos.length, prontos[0].length, original.sampleRate);
+  prontos.forEach((c, i) => buffer.copyToChannel(c, i));
+  engine.buffers.set(beat.audioId + ':tempo', buffer);
+  avisar(`Andamento do beat em ${Math.round(fator * 100)}%, com o tom preservado.`);
+  reiniciarSeTocando();
 }
 
 /** Lista para trocar cada som sintetizado por um sample (arquivo de áudio) do usuário. */
@@ -271,6 +323,17 @@ export function sugestaoDoBeat(): HTMLElement | string {
       desenharBeat();
       void reafinarTodos();
     }, emUso ? 'ativo' : ''));
+  }
+  const cents = estado.analise.cents;
+  if (cents !== null && Math.abs(cents) >= 12) {
+    const acompanha = Math.abs((estado.projeto.afinacaoCents ?? 0) - cents) < 3;
+    linhas.push(h('p', {}, `Afinação: o beat está ${Math.abs(Math.round(cents))} cents ${cents > 0 ? 'acima' : 'abaixo'} do padrão, "entre as notas". Sem ajuste, o tune puxa a voz para notas que não batem com ele.`));
+    linhas.push(botao(acompanha ? 'O tune já acompanha o beat' : 'Fazer o tune acompanhar o beat', () => {
+      estado.projeto.afinacaoCents = Math.round(cents);
+      mudou();
+      desenharBeat();
+      void reafinarTodos();
+    }, acompanha ? 'ativo' : ''));
   }
   if (!bpm && !tom) linhas.push(h('p', {}, 'Não consegui identificar BPM nem tom neste arquivo. Informe os dois abaixo.'));
   return h('div', { className: 'sugestao' }, h('strong', {}, 'Sugestão automática'), ...linhas,

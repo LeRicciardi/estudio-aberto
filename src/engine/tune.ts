@@ -81,7 +81,6 @@ export function detectarPitch(x: Float32Array, taxa: number): Float32Array {
   return liso;
 }
 
-const paraMidi = (hz: number) => 69 + 12 * Math.log2(hz / 440);
 
 /** Etapa 2. Nota da escala mais próxima (em número MIDI, pode ser fracionário na entrada). */
 export function notaAlvo(midi: number, tom: number, escala: EscalaTune): number {
@@ -119,6 +118,8 @@ export interface OpcoesTune {
   intensidade?: number;
   /** Semitons somados à voz inteira (voz mais grossa ou mais fina). Padrão 0. */
   transpor?: number;
+  /** Afinação de referência em cents (0 = Lá em 440 Hz). Para beats que estão "entre as notas". */
+  referencia?: number;
   /** Harmonia: desloca cada nota este número de graus da escala (2 = terça acima). Padrão 0. */
   graus?: number;
 }
@@ -131,6 +132,8 @@ export function afinar(x: Float32Array, taxa: number, op: OpcoesTune): Float32Ar
   const periodo = new Float32Array(quadros);
   const razao = new Float32Array(quadros);
   const suavizacao = op.velocidade <= 0 ? 1 : 1 - Math.exp(-(SALTO / taxa) / (op.velocidade * 0.25));
+  const la = 440 * 2 ** ((op.referencia ?? 0) / 1200);
+  const paraMidi = (hz: number) => 69 + 12 * Math.log2(hz / la);
   const intensidade = op.intensidade ?? 1;
   const transpor = op.transpor ?? 0;
   let saida = 0;

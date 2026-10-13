@@ -23,7 +23,7 @@ export async function reafinar(take: Take) {
   // Com o tune desligado, só a mudança de altura é aplicada (intensidade 0).
   const intensidade = take.tune.ligado ? take.tune.intensidade : 0;
   const tune = usaTune(take)
-    ? { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: take.tune.velocidade, intensidade, transpor: take.altura }
+    ? { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: take.tune.velocidade, intensidade, transpor: take.altura, referencia: estado.projeto.afinacaoCents ?? 0 }
     : undefined;
   const limpeza = { gate: take.limpeza.gate, deEsser: take.limpeza.deEsser, ruido: take.limpeza.ruido ?? 0, nivelar: take.limpeza.nivelar ?? 0 };
   const harmonia = take.harmonia?.quanto ? take.harmonia.graus : 0;
@@ -40,7 +40,7 @@ export async function reafinar(take: Take) {
   // Harmonia: a mesma gravação limpa, afinada firme e deslocada alguns graus da escala.
   if (harmonia) {
     guardar(':harm', await processarEmSegundoPlano(original.getChannelData(0), original.sampleRate, {
-      ...limpeza, tune: { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: 0.1, intensidade: 1, transpor: take.altura, graus: harmonia },
+      ...limpeza, tune: { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: 0.1, intensidade: 1, transpor: take.altura, referencia: estado.projeto.afinacaoCents ?? 0, graus: harmonia },
     }));
   }
   afinadoCom.set(take.audioId, ajustes);

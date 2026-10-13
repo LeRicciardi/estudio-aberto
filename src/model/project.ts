@@ -39,7 +39,7 @@ export type TamanhoReverb = 'quarto' | 'sala' | 'salao';
 /**
  * Valor de um passo da bateria:
  * 0 = vazio, 1 = normal, 2/3/4 = rolo (o som repete 2, 3 ou 4 vezes dentro do
- * passo), 5 = fraco ("nota fantasma").
+ * passo), 5 = fraco ("nota fantasma"), 6 = forte (acento).
  */
 export type Passo = number;
 
@@ -54,6 +54,8 @@ export interface Padrao {
   deslize: boolean[];
   /** Melodia: [linha (grau)][passo]. Várias notas ao mesmo tempo formam acordes. */
   melodia: boolean[][];
+  /** Sampler: qual fatia do loop toca em cada passo, ou -1 para nenhuma. */
+  fatias?: number[];
 }
 
 /** Um trecho do arranjo: um padrão repetido algumas vezes. */
@@ -115,6 +117,15 @@ export interface Take {
   edicao: { ini: number; fim: number; fadeIn: number; fadeOut: number; ganhoDb: number };
 }
 
+export interface AjusteDoSom {
+  volume: number;
+  pan: number;
+  /** Atraso extra nos passos pares, somado ao balanço geral (0 a 0,5). */
+  swing: number;
+  /** Semitons acima ou abaixo; vale para samples. */
+  altura: number;
+}
+
 /** Ajustes do master além do acabamento escolhido. */
 export interface AjusteDoMaster {
   graveDb: number;
@@ -151,6 +162,8 @@ export interface Project {
     cede: number;
     /** Velocidade do beat importado (1 = original). Mais rápido também fica mais agudo. */
     velocidade?: number;
+    /** Andamento do beat importado sem mudar o tom (1 = original). */
+    andamento?: number;
     /** Distorção proposital do beat inteiro, de 0 a 1 (o "estourado" do mandelão). */
     estourar?: number;
     /** O 808 abaixa por um instante a cada bumbo, para os dois não se embolarem. */
@@ -158,6 +171,14 @@ export interface Project {
   };
   /** Samples do usuário por som da bateria; sem sample, o som é sintetizado. */
   samples: Partial<Record<LaneId, { audioId: string; nome: string }>>;
+  /** Ajustes de cada som da bateria: volume, lado, balanço extra e altura (só em samples). */
+  sons?: Partial<Record<LaneId, AjusteDoSom>>;
+  /** Sampler: um loop importado, cortado em fatias que a grade dispara. */
+  sampler?: { audioId: string; nome: string; cortes: number[]; altura: number; invertido: boolean; volume: number };
+  /** Quantos cents o beat está fora da afinação padrão; o tune acompanha. */
+  afinacaoCents?: number;
+  /** Trechos da voz a silenciar na versão limpa, em segundos: "12.3-12.9, 45-45.6". */
+  limpa?: string;
   /** Sample de 808 do usuário. `nota` é a nota em que ele foi gravado (0 = Dó). */
   sample808?: { audioId: string; nome: string; nota: number };
   padroes: Padrao[];
@@ -241,6 +262,12 @@ export const SAMPLES_DE_FABRICA: Partial<Record<LaneId, { arquivo: string; nome:
   perc: [
     { arquivo: 'estalo-1.wav', nome: 'Estalo de dedos' },
     { arquivo: 'caixa-aro-1.wav', nome: 'Caixa no aro' },
+    { arquivo: 'cowbell-1.wav', nome: 'Cowbell' },
+    { arquivo: 'agogo-1.wav', nome: 'Agogô' },
+    { arquivo: 'chocalho-1.wav', nome: 'Chocalho' },
+    { arquivo: 'pandeiro-1.wav', nome: 'Pandeiro' },
+    { arquivo: 'clave-1.wav', nome: 'Clave' },
+    { arquivo: 'cabasa-1.wav', nome: 'Cabasa' },
   ],
   kick: [
     { arquivo: 'bumbo-fundo-1.wav', nome: 'Bumbo fundo 1' },
@@ -281,7 +308,7 @@ export function normalizar(p: Project): Project {
 
 /** Todo áudio que o projeto usa: beat importado, samples e takes. */
 export function idsDeAudio(p: Project): string[] {
-  const ids = [p.beat.audioId, p.sample808?.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
+  const ids = [p.beat.audioId, p.sample808?.audioId, p.sampler?.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
   return ids.filter((a): a is string => !!a);
 }
 
@@ -301,6 +328,7 @@ export function redimensionar(padrao: Padrao, compassos: number) {
   padrao.baixo = ajustar(padrao.baixo);
   padrao.deslize = ajustar(padrao.deslize);
   padrao.melodia = padrao.melodia.map(ajustar);
+  if (padrao.fatias) padrao.fatias = ajustar(padrao.fatias);
   padrao.compassos = compassos;
 }
 
@@ -347,8 +375,14 @@ export function bufferDoTake(take: Take, buffers: Map<string, AudioBuffer>): Aud
   return (usaProcessamento(take) && buffers.get(take.audioId + ':tune')) || buffers.get(take.audioId);
 }
 
+/** O áudio do beat importado: a versão com o andamento ajustado, se existir, ou o original. */
+export function bufferDoBeat(p: Project, buffers: Map<string, AudioBuffer>): AudioBuffer | undefined {
+  if (!p.beat.audioId) return undefined;
+  return ((p.beat.andamento ?? 1) !== 1 && buffers.get(p.beat.audioId + ':tempo')) || buffers.get(p.beat.audioId);
+}
+
 export function duracaoDaMusica(p: Project, buffers: Map<string, AudioBuffer>): number {
-  const arquivo = p.beat.fonte === 'arquivo' && p.beat.audioId ? buffers.get(p.beat.audioId) : undefined;
+  const arquivo = p.beat.fonte === 'arquivo' ? bufferDoBeat(p, buffers) : undefined;
   let fim = arquivo ? arquivo.duration / (p.beat.velocidade ?? 1) : (compassosDoArranjo(p) * 4 * 60) / p.bpm;
   for (const t of p.takes) {
     const b = buffers.get(t.audioId);
