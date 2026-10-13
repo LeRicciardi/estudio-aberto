@@ -7,7 +7,7 @@
 // Notação do 808: o número é o grau da escala (0 = tônica), ponto é vazio.
 
 import {
-  LANES, STEPS, padraoVazio,
+  LANES, STEPS, normalizar, padraoVazio,
   type Escala, type InstrumentoId, type KitId, type LaneId, type Padrao, type PresetVoz, type Project,
 } from './project.ts';
 
@@ -173,5 +173,5 @@ export function novoProjeto(genero = 'trap'): Project {
     letra: { texto: '', compasso: 1 },
   };
   aplicarGenero(p, genero);
-  return p;
+  return normalizar(p);
 }

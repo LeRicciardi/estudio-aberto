@@ -2,7 +2,7 @@
 // mouse, e as abas de padrão usadas pelas páginas do beat.
 
 import { estado, mudou } from '../estado.ts';
-import { LANES, LINHAS, STEPS, nomeDoGrau, padraoVazio } from '../model/project.ts';
+import { LANES, LINHAS, STEPS, nomeDoGrau, padraoVazio, passosDoPadrao } from '../model/project.ts';
 import { reiniciarSeTocando } from '../transporte.ts';
 import { botao, h } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
@@ -42,16 +42,26 @@ export function pintavel(grade: HTMLElement, b: HTMLButtonElement, proximo: () =
   };
 }
 
+/** Ajusta a grade ao número de passos do padrão (16 por compasso). */
+export function dimensionar(grade: HTMLElement, passos: number) {
+  grade.style.gridTemplateColumns = `110px repeat(${passos}, minmax(26px, 1fr))`;
+  grade.style.minWidth = `${110 + passos * 30}px`;
+}
+
+const classeDoPasso = (i: number) => (i % STEPS === 0 ? ' tempo-forte compasso-novo' : i % 4 === 0 ? ' tempo-forte' : '');
+
 export function gradeDeBateria(): HTMLElement {
   const padrao = estado.projeto.padroes[estado.padraoAtual];
   const grade = h('div', { className: 'grade' });
+  const passos = passosDoPadrao(padrao);
+  dimensionar(grade, passos);
   for (const lane of LANES) {
     grade.append(h('span', { className: 'nome-linha' }, lane.nome));
-    for (let i = 0; i < STEPS; i++) {
+    for (let i = 0; i < passos; i++) {
       const b = h('button', { ariaLabel: `${lane.nome}, passo ${i + 1}` });
       const pintar = () => {
         const v = padrao.bateria[lane.id][i];
-        b.className = 'passo' + (v ? ' ligado' : '') + (v === 5 ? ' fraco' : '') + (i % 4 === 0 ? ' tempo-forte' : '');
+        b.className = 'passo' + (v ? ' ligado' : '') + (v === 5 ? ' fraco' : '') + classeDoPasso(i);
         b.textContent = ROTULO_DO_PASSO[v];
       };
       pintavel(grade, b, () => (padrao.bateria[lane.id][i] === estado.pincel ? 0 : estado.pincel), (v) => {
@@ -69,14 +79,16 @@ export function gradeDeBateria(): HTMLElement {
 /** Grade de notas (808 ou melodia): linhas são notas da escala, agudas em cima. */
 export function gradeDeNotas(ligado: (linha: number, passo: number) => boolean, definir: (linha: number, passo: number, ligar: boolean) => void): HTMLElement {
   const grade = h('div', { className: 'grade notas' });
+  const passos = passosDoPadrao(estado.projeto.padroes[estado.padraoAtual]);
+  dimensionar(grade, passos);
   const botoes: HTMLButtonElement[][] = [];
   const pintar = () => botoes.forEach((linha, l) => linha.forEach((b, s) => b.classList.toggle('ligado', ligado(l, s))));
   for (let l = LINHAS - 1; l >= 0; l--) {
     const nota = nomeDoGrau(l, estado.projeto.tom, estado.projeto.escala);
     grade.append(h('span', { className: 'nome-linha' + (l % 7 === 0 ? ' tonica' : '') }, nota));
     botoes[l] = [];
-    for (let s = 0; s < STEPS; s++) {
-      const b = h('button', { className: 'passo' + (s % 4 === 0 ? ' tempo-forte' : ''), ariaLabel: `${nota}, passo ${s + 1}` });
+    for (let s = 0; s < passos; s++) {
+      const b = h('button', { className: 'passo' + classeDoPasso(s), ariaLabel: `${nota}, passo ${s + 1}` });
       pintavel(grade, b, () => (ligado(l, s) ? 0 : 1), (v) => {
         definir(l, s, v === 1);
         pintar();

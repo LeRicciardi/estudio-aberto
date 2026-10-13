@@ -4,11 +4,12 @@
 import { duracaoDoPasso } from './engine/tempo.ts';
 import { CHAVE_DO_MODO, av, engine, estado, gravador, projetoParaTocar, registrar, relogio } from './estado.ts';
 import { GENEROS } from './model/generos.ts';
-import { NOTAS, type Project, STEPS, duracaoDaMusica, padraoNoCompasso } from './model/project.ts';
+import { NOTAS, type Project, duracaoDaMusica, localizarPasso, passosDoPadrao } from './model/project.ts';
 import { PAGINAS, type PaginaId, barraDeTempo, botaoGravar, botaoTocar, contagemEl, etapaDeBeat, medidor, medidorDeEntrada, paginasVisiveis, rodape, secTransporte, tempo, trilha, visorInfo } from './moldura.ts';
 import { desenharBeat } from './paginas/beat.ts';
 import { desenharEstilo } from './paginas/estilo.ts';
 import { desenharGravar } from './paginas/gravar.ts';
+import { desenharLancar } from './paginas/lancar.ts';
 import { atualizarTeleprompter, desenharLetra, desenharTeleprompter } from './paginas/letra.ts';
 import { desenharMaster } from './paginas/master.ts';
 import { desenharMixer } from './paginas/mixer.ts';
@@ -117,7 +118,7 @@ export function emLoop() {
 
 export function reiniciarSeTocando() {
   if (!engine.tocando || estado.gravando || estado.previa) return;
-  if (emLoop()) void engine.tocar(projetoParaTocar(), engine.posicao() % (duracaoDoPasso(estado.projeto.bpm) * STEPS), estado.padraoAtual);
+  if (emLoop()) void engine.tocar(projetoParaTocar(), engine.posicao() % (duracaoDoPasso(estado.projeto.bpm) * passosDoPadrao(estado.projeto.padroes[estado.padraoAtual])), estado.padraoAtual);
   else void engine.tocar(projetoParaTocar(), engine.posicao());
 }
 
@@ -182,8 +183,10 @@ export function quadro() {
   let passoAtual = -1;
   if (engine.tocando && !estado.previa && estado.projeto.beat.fonte === 'padrao') {
     const passo = Math.floor(pos / duracaoDoPasso(estado.projeto.bpm));
-    const soando = loop ? estado.projeto.padroes[estado.padraoAtual] : padraoNoCompasso(estado.projeto, Math.floor(passo / STEPS));
-    if (soando === estado.projeto.padroes[estado.padraoAtual]) passoAtual = passo % STEPS;
+    const aberto = estado.projeto.padroes[estado.padraoAtual];
+    const local = loop ? undefined : localizarPasso(estado.projeto, passo);
+    if (loop && aberto) passoAtual = passo % passosDoPadrao(aberto);
+    else if (local?.padrao === aberto) passoAtual = local.s;
   }
   estado.colunas.forEach((celulas, i) => celulas.forEach((c) => c.classList.toggle('atual', i === passoAtual)));
 
@@ -204,5 +207,6 @@ export function desenharTudo() {
   desenharVozes();
   void desenharGravar();
   desenharMaster();
+  desenharLancar();
   desenharProjeto();
 }

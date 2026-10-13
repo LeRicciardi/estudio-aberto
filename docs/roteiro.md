@@ -16,57 +16,43 @@ Consolidação de seis pesquisas feitas em outubro de 2026, cada uma com um esco
 - **DJs querem acapella e instrumental oficiais, BPM e tom no arquivo.** A separação por IA vaza e soa robótica ([Digital DJ Pool](https://digitaldjpool.com/blog/dj-edits-explained/), [Crossfader](https://wearecrossfader.co.uk/blog/where-do-djs-get-acapellas/)).
 - **Beatmakers travam no loop que nunca vira música** e dependem de sample fatiado, padrões de mais de um compasso e controle fino de chimbal ([MPC-Forums](https://www.mpc-forums.com/viewtopic.php?p=1468951), [Attack](https://www.attackmagazine.com/technique/beat-dissected/uk-drill/)).
 
-## Feito nesta rodada
+## Já implementado
 
-| Ferramenta | Por quê |
+| Frente | Ferramenta |
 |---|---|
-| O beat abre espaço quando a voz entra (corte em 3 kHz e leve queda de volume, calculados a partir da gravação) | Técnica central para voz sobre beat pronto |
-| Diagnóstico da mix: mede equilíbrio, mascaramento, voz abafada, sibilância, dinâmica, mono e volume; explica e corrige | Mixagem assistida para quem não tem formação técnica |
-| Escuta em mono e em "caixa de celular" | Erros de master mais citados; público ouve em celular e paredão |
-| Página Letra: uma linha por compasso, sílabas aproximadas, letra acompanhando a música ao gravar | Pedido antigo em vários fóruns; nenhum concorrente prende a letra ao compasso |
-| Versões do projeto guardadas no navegador | Fraqueza declarada do BandLab; serve também de registro com data |
-| Exportação com nome no padrão de DJ: versão, BPM, tom e Camelot; acapella e instrumental | Faz a faixa entrar em montagens e sets |
+| Captação | Teste do lugar de gravação (ruído de fundo e eco, por uma palma); aviso de voz estourada ou baixa; medição do atraso do aparelho; trazer voz já gravada (WhatsApp, gravador do celular) como take |
+| Limpeza | Redução de ruído, gate, nivelamento por frase, de-esser |
+| Voz | "Ajustar ao meu take" (mede a gravação e regula equalizador, compressor e limpeza); papéis de principal, dobra e adlib; compressão dupla e paralela; harmonia automática na escala; eco só no fim da frase; exportar take como vinheta (seca e com efeito) |
+| Mix | O beat abre espaço quando a voz entra; diagnóstico que mede, explica e corrige; escuta em mono e em caixa de celular |
+| Beat | Padrões de 1, 2 ou 4 compassos; rolos em crescendo; acordes pelos graus da escala; 808 que abaixa a cada bumbo; "estourar o beat" (clipping controlado); instrumento "tuin"; velocidade do beat importado |
+| Arranjo | Nome, mudos (bateria, 808, melodia) e virada (subida, prato ao contrário, silêncio) por trecho; estrutura de música pronta (intro, versos, refrões, final) |
+| Master | Limitador suave (soft clipper), além de cola, equalizador, largura e volume final |
+| Letra | Uma linha por compasso, sílabas aproximadas, letra acompanhando a música ao gravar |
+| Lançar | Dados da música e ficha da licença do beat; conferência do áudio (pico, volume, silêncio, duração) e da capa; pacote .zip com WAV (16 ou 24 bits), MP3 com BPM e tom gravados no arquivo, acapella, instrumental, versão para DJ com intro e saída, faixas separadas desde o compasso 1, ficha e letra |
+| Base | Versões do projeto; teclado MIDI (tocar e escrever na grade) |
 
-## Próximas prioridades
+## O que ainda falta
 
-### 1. Captação (o que mais muda o resultado)
-- **Guia de captação antes de gravar:** teste de ruído da sala e de eco (por palma), aviso de nível enquanto canta. Hoje o aviso só vem depois do take.
-- **Redução de ruído leve.** Começar por gate espectral próprio; DeepFilterNet (MIT/Apache, cerca de 16 MB) como opção baixada sob demanda.
-- **Importar áudio do WhatsApp** (voz de MC, vinheta), inclusive no formato comprimido dele, e receber arquivos pelo "compartilhar" do celular.
-- **Regravar em laço:** repetir um trecho e empilhar um take por volta.
+Em ordem de valor para o artista:
 
-### 2. Voz e mix
-- **Nivelamento automático por frase** antes do compressor (hoje só há ganho do take inteiro).
-- **Duas compressões em série** e compressão paralela nos timbres.
-- **Harmonias e dobras automáticas na escala**, reaproveitando o tune.
-- **Eco só no fim da frase** (automação da mandada de delay).
-- **Canal de adlibs e dobras** com ajuste próprio.
-- **Preset que mede o take** (grave, sibilância, dinâmica) em vez de valores fixos, e aviso quando o beat está fora da afinação padrão.
+1. **Regravar em laço**, empilhando um take por volta.
+2. **Sampler**: fatiar um loop por transiente ou grade, tocar as fatias, inverter, mudar a altura. É a base do boombap e do "loop primeiro" do trap.
+3. **Volume, lado e altura por nota**, e balanço (swing) diferente para cada som.
+4. **Mudar o andamento de um beat importado sem mudar o tom** (hoje a velocidade muda os dois). Candidata: `signalsmith-stretch`, MIT.
+5. **Vídeo vertical curto** com forma de onda e letra, para Reels, TikTok e Canvas.
+6. **Receber áudio pelo "compartilhar" do celular** direto no aplicativo instalado.
+7. **Versão limpa** (silenciar palavras marcadas) e versões em vários andamentos para DJs de funk.
+8. **Redução de ruído por rede neural** (DeepFilterNet), baixada sob demanda, para gravações muito ruins.
+9. **Aviso de beat fora da afinação padrão**, que faz o tune puxar para notas erradas.
+10. **Biblioteca de sons maior**, só com licença de domínio público verificada.
+11. **Colaboração em tempo real.**
 
-### 3. Criação de beat
-- **Padrões de 2, 4 e 8 compassos**, tercinas e 1/32.
-- **Volume, lado e altura por nota**, com rampa nos rolos de chimbal.
-- **Sampler:** fatiar um loop por transiente ou grade, tocar as fatias, inverter, mudar a altura.
-- **808 abaixando sob o bumbo** e limitador suave (soft clipper) no master.
-- **Viradas e efeitos de transição** (crash invertido, subida, silêncio antes do refrão) e mudo por trecho no arranjo.
-- **Modelos de estrutura por gênero** para tirar a música do loop.
-- **Ajudante de acordes** a partir dos graus da escala.
-- **Para o funk:** distorção e clipping controláveis, gerador de "tuin", troca de andamento entre 130, 150 e 170 sem perder o grave.
+## O que não foi verificado
 
-### 4. Entrega e lançamento
-- **Tags no arquivo** (BPM, tom, capa, créditos, ISRC) e WAV de 24 bits.
-- **Intro e saída automáticas de 8 ou 16 compassos** a partir do beat sem voz, e versão limpa.
-- **Pacote em .zip** com música, acapella, instrumental e faixas separadas, todas começando no compasso 1.
-- **Checklist de lançamento:** volume, pico, silêncio nas pontas, capa quadrada de 3000 px, créditos do beatmaker, ISRC, cadastro em associação do ECAD.
-- **Ficha da licença do beat** (tipo, limite de streams, validade, crédito).
-- **Vídeo vertical curto** com forma de onda e letra, para Reels, TikTok e Canvas.
-- **Página de vinhetas** (gravar, tratar, exportar seca e com efeito).
-
-### 5. Base
-- **Teclado MIDI** no computador.
-- **Biblioteca de sons maior**, só com licença de domínio público verificada.
-- **Mudar tom e andamento de um beat importado** (`signalsmith-stretch`, MIT).
-- **Desempenho em celular de entrada**, que ainda não foi medido.
+- Nada foi ouvido por uma pessoa: todos os testes são medições. Timbres, tune, harmonia e redução de ruído precisam do ouvido de quem usa.
+- Gravação com microfone real, celular de entrada e iPhone continuam sem teste.
+- O teclado MIDI foi escrito sem um controlador ligado para testar.
+- Os limiares do diagnóstico, do "ajustar ao meu take" e do teste de ambiente foram calibrados com sinais sintéticos.
 
 ## Decisões tomadas
 

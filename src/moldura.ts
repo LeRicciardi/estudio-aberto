@@ -42,6 +42,8 @@ export const secMixer = pagina_('mixer');
 
 export const secMaster = pagina_('master');
 
+export const secLancar = pagina_('lancar');
+
 export const secProjeto = pagina_('projeto');
 
 export const trilha = h('nav', { className: 'trilha', ariaLabel: 'Páginas' });
@@ -64,6 +66,7 @@ export const PAGINAS = [
   { id: 'efeitos', nome: 'Voz', secao: secVozes, simples: true },
   { id: 'mixer', nome: 'Mixer', secao: secMixer, simples: false },
   { id: 'master', nome: 'Master', secao: secMaster, simples: true },
+  { id: 'lancar', nome: 'Lançar', secao: secLancar, simples: true },
   { id: 'projeto', nome: 'Projeto', secao: secProjeto, simples: true },
 ] as const;
 

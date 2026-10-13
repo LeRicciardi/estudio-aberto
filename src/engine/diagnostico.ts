@@ -2,6 +2,7 @@
 // atrapalhando e por quê. Cada achado pode trazer uma correção sugerida.
 // Funções puras sobre os samples já renderizados.
 
+import { fft } from './fft.ts';
 import { medirLufs } from './loudness.ts';
 
 export type Correcao =
@@ -20,34 +21,6 @@ export interface Achado {
   correcao?: Correcao;
   /** Texto do botão da correção. */
   acao?: string;
-}
-
-/** Transformada de Fourier (radix-2, no lugar). `re` e `im` têm tamanho potência de 2. */
-function fft(re: Float32Array, im: Float32Array) {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      [re[i], re[j]] = [re[j], re[i]];
-      [im[i], im[j]] = [im[j], im[i]];
-    }
-  }
-  for (let tam = 2; tam <= n; tam <<= 1) {
-    const ang = (-2 * Math.PI) / tam;
-    for (let i = 0; i < n; i += tam) {
-      for (let k = 0; k < tam / 2; k++) {
-        const c = Math.cos(ang * k), s = Math.sin(ang * k);
-        const a = i + k, b = i + k + tam / 2;
-        const tr = re[b] * c - im[b] * s, ti = re[b] * s + im[b] * c;
-        re[b] = re[a] - tr;
-        im[b] = im[a] - ti;
-        re[a] += tr;
-        im[a] += ti;
-      }
-    }
-  }
 }
 
 /**
@@ -213,4 +186,60 @@ export function diagnosticar(e: EntradaDoDiagnostico): Achado[] {
 export function camelot(tom: number, escala: 'maior' | 'menor'): string {
   const passo = (tom * 7) % 12;
   return escala === 'maior' ? `${((passo + 7) % 12) + 1}B` : `${((passo + 4) % 12) + 1}A`;
+}
+
+export interface Sugestao {
+  /** Ganho da gravação para a voz chegar a um volume de trabalho, em dB. */
+  ganhoDb: number;
+  corte: number;
+  graveDb: number;
+  arDb: number;
+  deEsser: number;
+  /** Limiar do compressor, relativo ao volume desta gravação. */
+  limiar: number;
+  /** Limiar do gate em dB, ou 0 quando o fundo já é silencioso. */
+  gate: number;
+  motivos: string[];
+}
+
+/**
+ * Mede uma gravação e sugere os ajustes de partida para ela: em vez de
+ * valores fixos de preset, números tirados da própria voz.
+ */
+export function sugerirAjustes(x: Float32Array, taxa: number): Sugestao {
+  const N = 2048;
+  const niveis: number[] = [];
+  for (let ini = 0; ini + N <= x.length; ini += N) {
+    let s = 0;
+    for (let i = ini; i < ini + N; i++) s += x[i] * x[i];
+    niveis.push(10 * Math.log10(s / N + 1e-12));
+  }
+  const ordenado = [...niveis].sort((a, b) => a - b);
+  const alto = ordenado[Math.floor(ordenado.length * 0.9)] ?? -60;
+  const fundo = ordenado[Math.floor(ordenado.length * 0.1)] ?? -90;
+  const cantando = (q: number) => niveis[q] > alto - 20;
+  const [sub, corpo, fala, ar, s] = energiaPorFaixa(x, taxa, [[20, 90], [200, 450], [1000, 4000], [8000, 14000], [6000, 10000]], cantando);
+  const motivos: string[] = [];
+
+  // Volume de trabalho: partes altas perto de -18 dB, onde o compressor age bem.
+  const ganhoDb = Math.max(-12, Math.min(12, -18 - alto));
+  if (Math.abs(ganhoDb) >= 2) motivos.push(`A gravação está ${ganhoDb > 0 ? 'baixa' : 'alta'}: ganho de ${ganhoDb > 0 ? '+' : ''}${ganhoDb.toFixed(0)} dB antes dos efeitos.`);
+
+  const corte = sub > fala - 12 ? 120 : 90;
+  if (corte > 90) motivos.push('Há ronco abaixo de 90 Hz (microfone, mesa, respiração): corte de graves mais alto.');
+
+  const graveDb = corpo > fala + 12 ? -4 : corpo > fala + 8 ? -2 : 0;
+  if (graveDb) motivos.push(`A voz tem muito corpo (200 a 450 Hz), o que abafa: ${graveDb} dB nessa faixa.`);
+
+  const arDb = ar < fala - 30 ? 4 : ar < fala - 24 ? 2 : 0;
+  if (arDb) motivos.push(`Falta brilho na gravação: +${arDb} dB de ar.`);
+
+  const deEsser = s > fala - 4 ? 0.7 : s > fala - 8 ? 0.4 : 0;
+  if (deEsser) motivos.push('Os "s" estão fortes: de-esser ligado.');
+
+  const gate = alto - fundo < 35 ? Math.round(Math.min(-30, fundo + ganhoDb + 8)) : 0;
+  if (gate) motivos.push('O fundo da gravação tem ruído: gate ligado para limpar entre as frases.');
+
+  if (!motivos.length) motivos.push('A gravação está equilibrada; só o compressor foi ajustado ao volume dela.');
+  return { ganhoDb, corte, graveDb, arDb, deEsser, limiar: -26, gate, motivos };
 }

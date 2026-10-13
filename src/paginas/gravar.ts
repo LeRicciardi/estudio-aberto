@@ -1,6 +1,6 @@
 // Página Gravar: gravação de voz, contagem, microfone e lista de takes.
 
-import { avisoDeNivel } from '../engine/analise.ts';
+import { analisarAmbiente, avisoDeNivel } from '../engine/analise.ts';
 import { listarMicrofones, medirLatencia } from '../engine/recorder.ts';
 import { aplicarTimbre } from '../engine/vocalChain.ts';
 import { av, avisosDeTake, engine, estado, gravador, id, mudou, prefs, projetoParaTocar, relogio } from '../estado.ts';
@@ -105,7 +105,57 @@ export function latenciaEstimada(): number {
   return Math.round((baseLatency + (outputLatency || 0) + gravador.latenciaDeEntrada) * 1000);
 }
 
+let ambiente: string[] = [];
+
+/** Grava 4 segundos (silêncio e uma palma) e diz se o lugar serve para gravar. */
+async function testarAmbiente() {
+  if (engine.tocando || estado.gravando) return;
+  try {
+    avisar('Testando o lugar: fique em silêncio e, quando quiser, bata UMA palma forte. 4 segundos...');
+    await engine.ctx.resume();
+    await gravador.iniciar(prefs.microfone || undefined);
+    await new Promise((ok) => setTimeout(ok, 4000));
+    const g = gravador.parar();
+    ambiente = analisarAmbiente(g.amostras, g.taxa).avisos;
+    avisar('Teste do lugar concluído.');
+  } catch {
+    avisar('Não consegui acessar o microfone.');
+  }
+  void desenharGravar();
+}
+
+/** Traz um áudio de fora (mensagem de voz, gravador do celular) como um take, no ponto onde a música está. */
+export async function importarVoz(arquivo: File) {
+  try {
+    const decodificado = await engine.ctx.decodeAudioData(await arquivo.arrayBuffer());
+    // Takes são mono: soma os canais.
+    const amostras = new Float32Array(decodificado.length);
+    for (let c = 0; c < decodificado.numberOfChannels; c++) {
+      const canal = decodificado.getChannelData(c);
+      for (let i = 0; i < amostras.length; i++) amostras[i] += canal[i] / decodificado.numberOfChannels;
+    }
+    const take = novoTake(id(), arquivo.name.replace(/\.[^.]+$/, '').slice(0, 30) || 'Voz importada', id(), estado.cursor, estado.projeto.voz);
+    aplicarTimbre(take, take.preset);
+    const buffer = engine.ctx.createBuffer(1, amostras.length, decodificado.sampleRate);
+    buffer.copyToChannel(amostras, 0);
+    engine.buffers.set(take.audioId, buffer);
+    estado.projeto.takes.push(take);
+    const nivel = avisoDeNivel(amostras);
+    if (nivel) avisosDeTake.set(take.id, nivel);
+    mudou();
+    desenharVozes();
+    void desenharGravar();
+    avisar(nivel ?? `"${take.nome}" entrou como take, começando onde a música estava. Ajuste o começo em Voz → Edição.`);
+    await guardarAudio(take.audioId, { tipo: 'pcm', taxa: decodificado.sampleRate, amostras });
+    void reafinar(take);
+  } catch {
+    avisar('Não consegui ler esse áudio. Mensagens de voz do WhatsApp (.opus) abrem no Chrome e no Firefox; no iPhone, converta antes para MP3 ou M4A.');
+  }
+}
+
 export async function desenharGravar() {
+  const arquivoDeVoz = h('input', { type: 'file', accept: 'audio/*,.opus,.ogg,.m4a' });
+  arquivoDeVoz.onchange = () => arquivoDeVoz.files?.[0] && void importarVoz(arquivoDeVoz.files[0]);
   const contagem = h('input', { type: 'checkbox', checked: prefs.contagem });
   contagem.onchange = () => {
     prefs.contagem = contagem.checked;
@@ -160,6 +210,11 @@ export async function desenharGravar() {
     h('div', { className: 'linha palco' }, botaoGravarGrande, contagemEl),
     campo('Nível do microfone', medidorDeEntrada),
     teleprompter,
+    h('div', { className: 'linha' },
+      botao('Testar o lugar de gravação', () => void testarAmbiente()),
+      campo('Trazer uma voz já gravada (WhatsApp, gravador do celular)', arquivoDeVoz),
+    ),
+    ...ambiente.map((a) => h('p', { className: 'nota alerta' }, a)),
     h('div', { className: 'linha' }, h('label', { className: 'caixa' }, contagem, 'Contagem de 4 antes de gravar'), escolha),
     ...lista,
     h('h3', {}, 'Voz fora do tempo?'),

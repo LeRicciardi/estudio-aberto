@@ -26,6 +26,19 @@ export const PRESETS_MASTER: Record<PresetMaster, { nome: string; cola: [number,
   },
 };
 
+/** Curva que deixa o som passar intacto até `joelho` e arredonda o que passar disso, sem nunca exceder 1. */
+function curvaDeCorte(joelho: number): Float32Array {
+  const n = 4097;
+  const curva = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    // A curva cobre de -3 a +3 para sinais empurrados além do máximo; o WaveShaper lê de -1 a 1.
+    const x = ((i / (n - 1)) * 2 - 1);
+    const a = Math.abs(x);
+    curva[i] = Math.sign(x) * (a < joelho ? a : joelho + (1 - joelho) * Math.tanh((a - joelho) / (1 - joelho)));
+  }
+  return curva;
+}
+
 interface Canal {
   entrada: GainNode;
   volume: GainNode;
@@ -51,6 +64,9 @@ export class Mixer {
   private cedeParaVoz: GainNode;
   /** Último nó antes das caixas de som; a escuta (mono, celular) é montada depois dele. */
   private paraAsCaixas: GainNode;
+  private baixoCede: GainNode;
+  private estouro: { entrada: GainNode; forma: WaveShaperNode; saida: GainNode; ligado: boolean };
+  private clipper: GainNode;
   private nosDaEscuta: AudioNode[] = [];
   escuta: Escuta = 'normal';
   private canais = new Map<string, Canal>();
@@ -72,7 +88,10 @@ export class Mixer {
     this.barraBateria = ctx.createGain();
     this.barraBaixo = ctx.createGain();
     this.barraMelodia = ctx.createGain();
-    for (const b of [this.barraBateria, this.barraBaixo, this.barraMelodia]) b.connect(this.barraDoBeat);
+    // O 808 passa por um ganho que abaixa por um instante a cada bumbo.
+    this.baixoCede = ctx.createGain();
+    this.barraBaixo.connect(this.baixoCede).connect(this.barraDoBeat);
+    for (const b of [this.barraBateria, this.barraMelodia]) b.connect(this.barraDoBeat);
     this.entradaMaster = ctx.createGain();
     // Folga de 6 dB: várias faixas somadas passam fácil do máximo. Começar
     // mais baixo deixa o master trabalhar sem distorcer.
@@ -88,7 +107,13 @@ export class Mixer {
     this.espacoParaVoz.frequency.value = 3000;
     this.espacoParaVoz.Q.value = 1;
     this.cedeParaVoz = ctx.createGain();
-    this.barraDoBeat.connect(this.espacoParaVoz).connect(this.cedeParaVoz).connect(this.entradaMaster);
+    this.espacoParaVoz.connect(this.cedeParaVoz).connect(this.entradaMaster);
+    // "Estourar": o beat inteiro empurrado contra um limite, de propósito.
+    this.estouro = { entrada: ctx.createGain(), forma: ctx.createWaveShaper(), saida: ctx.createGain(), ligado: false };
+    this.estouro.forma.curve = curvaDeCorte(0.25);
+    this.estouro.forma.oversample = '4x';
+    this.estouro.entrada.connect(this.estouro.forma).connect(this.estouro.saida).connect(this.espacoParaVoz);
+    this.barraDoBeat.connect(this.espacoParaVoz);
 
     const banda = (tipo: BiquadFilterType, hz: number) => {
       const f = ctx.createBiquadFilter();
@@ -120,7 +145,14 @@ export class Mixer {
     this.limitador.knee.value = 0;
     this.limitador.attack.value = 0.001;
     this.limitador.release.value = 0.1;
-    junta.connect(this.cola).connect(this.ganhoMaster).connect(this.limitador).connect(this.saida);
+    // Limitador suave (soft clipper): abaixo de 70% do máximo não faz nada;
+    // acima, arredonda o pico em vez de cortá-lo seco. Empurrar a música
+    // contra ele dá volume sem achatar tanto as batidas quanto um limitador.
+    this.clipper = ctx.createGain();
+    const arredonda = ctx.createWaveShaper();
+    arredonda.curve = curvaDeCorte(0.7);
+    arredonda.oversample = '4x';
+    junta.connect(this.cola).connect(this.ganhoMaster).connect(this.clipper).connect(arredonda).connect(this.limitador).connect(this.saida);
     this.paraAsCaixas = ctx.createGain();
     this.saida.connect(this.paraAsCaixas).connect(ctx.destination);
 
@@ -174,6 +206,24 @@ export class Mixer {
     volume.setValueCurveAtTime(curvaDeGanho(trecho, p.beat.cede), t0, duracao);
   }
 
+  /** A cada bumbo, o 808 abaixa por um instante e volta: os dois deixam de se embolar. */
+  abaixarBaixo(t: number) {
+    this.baixoCede.gain.setValueAtTime(0.5, t);
+    this.baixoCede.gain.linearRampToValueAtTime(1, t + 0.14);
+  }
+
+  /**
+   * Agenda o "eco só no fim da frase" de um take: `curva` é o volume da
+   * mandada de delay ponto a ponto desde o começo da música; null desliga.
+   */
+  agendarEco(takeId: string, curva: Float32Array | null, t0: number, desde: number) {
+    const mandada = this.canais.get(takeId)?.cadeia.mandadaDelay.gain;
+    if (!mandada || !curva) return;
+    const trecho = curva.subarray(Math.min(curva.length, Math.floor(desde * TAXA_DA_CURVA)));
+    mandada.cancelScheduledValues(0);
+    if (trecho.length >= 2) mandada.setValueCurveAtTime(trecho, t0, trecho.length / TAXA_DA_CURVA);
+  }
+
   /** Troca o jeito de ouvir a saída. Não muda a música nem a exportação. */
   definirEscuta(modo: Escuta) {
     this.escuta = modo;
@@ -211,6 +261,17 @@ export class Mixer {
     this.barraBateria.gain.value = p.volumes.bateria;
     this.barraBaixo.gain.value = p.volumes.baixo;
     this.barraMelodia.gain.value = p.volumes.melodia;
+    // Estourar o beat: liga o caminho da distorção só quando pedido.
+    const estourar = p.beat.estourar ?? 0;
+    if (estourar > 0 !== this.estouro.ligado) {
+      this.barraDoBeat.disconnect();
+      this.barraDoBeat.connect(estourar > 0 ? this.estouro.entrada : this.espacoParaVoz);
+      const medidor = this.medidores.get('beat');
+      if (medidor) this.barraDoBeat.connect(medidor);
+      this.estouro.ligado = estourar > 0;
+    }
+    this.estouro.entrada.gain.value = 1 + estourar * 11;
+    this.estouro.saida.gain.value = 1 / (1 + estourar * 1.5);
     for (const [id, canal] of this.canais) {
       if (!p.takes.some((t) => t.id === id)) {
         canal.entrada.disconnect();
@@ -267,6 +328,7 @@ export class Mixer {
     this.cola.threshold.value = r.cola[0];
     this.cola.ratio.value = r.cola[1];
     this.ganhoMaster.gain.value = 10 ** (r.ganhoDb / 20);
+    this.clipper.gain.value = 1 + (a.clipper ?? 0) * 1.8;
     const limita = p.master !== 'desligado' && !this.offline;
     this.limitador.threshold.value = limita ? r.teto : 0;
     this.limitador.ratio.value = limita ? 20 : 1;

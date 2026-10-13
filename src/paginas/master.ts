@@ -52,6 +52,7 @@ export function desenharMaster() {
           av(banda('Grave', 'graveDb')),
           av(banda('Médio', 'medioDb')),
           av(banda('Agudo', 'agudoDb')),
+          av(giratorio({ rotulo: 'Limitador suave', min: 0, max: 1, valor: a.clipper ?? 0, padrao: 0, formato: (v) => `${Math.round(v * 100)}%`, aoMudar: (v) => { a.clipper = v; } })),
           av(giratorio({ rotulo: 'Largura', min: 0, max: 2, valor: a.largura, padrao: 1, formato: (v) => (v < 0.05 ? 'Mono' : `${Math.round(v * 100)}%`), aoMudar: (v) => { a.largura = v; } })),
         ),
         seletor('Volume final da exportação', [
@@ -63,6 +64,7 @@ export function desenharMaster() {
         explicacao([
           ...PRESETS_MASTER[estado.projeto.master].explicacao,
           'Grave, médio e agudo: ajuste fino do tom da música inteira. Use pouco (1 a 2 dB); se precisar de muito, o problema está na mix.',
+          'Limitador suave (soft clipper): arredonda os picos das batidas em vez de abaixar a música inteira. Dá volume mantendo o impacto do bumbo; em excesso, distorce.',
           'Largura: abre ou fecha o estéreo. Acima de 100% a música parece mais larga; em "Mono" você confere como ela soa em caixa de som de celular.',
           'Volume final: a exportação mede o volume percebido da música (em LUFS) e ajusta para o alvo. As plataformas igualam o volume de todas as músicas, então passar do alvo delas não deixa a sua mais alta lá.',
           'Depois de tudo, um limitador de pico garante que nada passe de -1 dBFS, a folga pedida pelas plataformas.',

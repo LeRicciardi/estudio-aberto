@@ -29,7 +29,8 @@ export const semitonsDoGrau = (grau: number, escala: Escala) => GRAUS[escala][gr
 export const nomeDoGrau = (grau: number, tom: number, escala: Escala) => NOTAS[(tom + semitonsDoGrau(grau, escala)) % 12];
 
 export type KitId = 'trap' | 'boombap' | 'drill' | 'plug' | 'hard' | 'funk' | 'mandelao';
-export type InstrumentoId = 'sino' | 'piano' | 'pluck' | 'pad' | 'lead';
+export type InstrumentoId = 'sino' | 'piano' | 'pluck' | 'pad' | 'lead' | 'tuin';
+export type Virada = 'nenhuma' | 'subida' | 'crash' | 'silencio';
 export type PresetVoz = 'cru' | 'rap' | 'boombap' | 'trap' | 'plug' | 'rnb' | 'drill' | 'hard' | 'funk';
 export type PresetMaster = 'desligado' | 'limpo' | 'alto';
 export type DivisaoDelay = 4 | 8 | 16;
@@ -44,6 +45,8 @@ export type Passo = number;
 
 export interface Padrao {
   nome: string;
+  /** Tamanho do padrão em compassos (1, 2 ou 4). Cada compasso tem 16 passos. */
+  compassos?: number;
   bateria: Record<LaneId, Passo[]>;
   /** 808: grau da escala em cada passo, ou -1 para vazio. Uma nota por vez. */
   baixo: number[];
@@ -56,7 +59,14 @@ export interface Padrao {
 /** Um trecho do arranjo: um padrão repetido algumas vezes. */
 export interface Bloco {
   padrao: number;
+  /** Quantos compassos o trecho dura (o padrão se repete dentro dele). */
   vezes: number;
+  /** Nome do trecho: Intro, Verso, Refrão... */
+  nome?: string;
+  /** Partes do padrão silenciadas neste trecho. */
+  mudos?: { bateria?: boolean; baixo?: boolean; melodia?: boolean };
+  /** Efeito no último compasso, preparando a entrada do trecho seguinte. */
+  virada?: Virada;
 }
 
 export interface Take {
@@ -87,12 +97,20 @@ export interface Take {
   naMontagem: boolean;
   /** Equalizador: o timbre escolhido preenche estes valores, e eles podem ser mexidos depois. */
   eq: { corte: number; graveDb: number; medioHz: number; medioDb: number; arDb: number };
-  /** Compressor: limiar e ganho em dB, ataque e soltura em milissegundos. */
-  comp: { limiar: number; razao: number; ataque: number; soltura: number; ganho: number };
+  /**
+   * Compressor: limiar e ganho em dB, ataque e soltura em milissegundos.
+   * `dupla` liga um segundo compressor, lento, depois do primeiro; `paralela`
+   * mistura uma cópia esmagada da voz (0 a 1).
+   */
+  comp: { limiar: number; razao: number; ataque: number; soltura: number; ganho: number; dupla?: boolean; paralela?: number };
   /** Dobra estéreo: cópias levemente atrasadas da voz, uma de cada lado (0 a 1). */
   dobra: number;
   /** Limpeza: `gate` é o limiar em dB abaixo do qual o som é abafado (0 = desligado); `deEsser` vai de 0 a 1. */
-  limpeza: { gate: number; deEsser: number };
+  limpeza: { gate: number; deEsser: number; ruido?: number; nivelar?: number };
+  /** Eco só no fim das frases, em vez de o tempo todo. */
+  ecoNoFim?: boolean;
+  /** Harmonia automática: uma segunda voz, alguns graus da escala acima ou abaixo. */
+  harmonia?: { quanto: number; graus: number };
   /** Edição: segundos aparados do começo e do fim, fades e ganho da gravação em dB. */
   edicao: { ini: number; fim: number; fadeIn: number; fadeOut: number; ganhoDb: number };
 }
@@ -104,6 +122,8 @@ export interface AjusteDoMaster {
   agudoDb: number;
   /** Largura do estéreo: 0 = mono, 1 = como está, 2 = bem aberto. */
   largura: number;
+  /** Limitador suave: arredonda os picos para ganhar volume (0 a 1). */
+  clipper?: number;
   /** Volume-alvo da exportação em LUFS; null = não ajustar. */
   alvoLufs: number | null;
 }
@@ -129,6 +149,12 @@ export interface Project {
     espaco: boolean;
     /** Quanto o volume do beat cai (em dB) enquanto a voz canta. */
     cede: number;
+    /** Velocidade do beat importado (1 = original). Mais rápido também fica mais agudo. */
+    velocidade?: number;
+    /** Distorção proposital do beat inteiro, de 0 a 1 (o "estourado" do mandelão). */
+    estourar?: number;
+    /** O 808 abaixa por um instante a cada bumbo, para os dois não se embolarem. */
+    sidechain?: boolean;
   };
   /** Samples do usuário por som da bateria; sem sample, o som é sintetizado. */
   samples: Partial<Record<LaneId, { audioId: string; nome: string }>>;
@@ -150,16 +176,29 @@ export interface Project {
   ajusteDoMaster: AjusteDoMaster;
   /** Letra: cada linha vale um compasso, a partir de `compasso` (o primeiro é 1). */
   letra: { texto: string; compasso: number };
+  /** Dados para lançar a música e ficha do beat usado. */
+  lancamento?: Lancamento;
 }
 
-export function padraoVazio(nome: string): Padrao {
-  const vazio = () => Array<number>(STEPS).fill(0);
+export interface Lancamento {
+  artista: string;
+  produtor: string;
+  isrc: string;
+  explicito: boolean;
+  /** Licença do beat: tipo (gratuito, lease, exclusivo...), limite de streams, validade e crédito exigido. */
+  licenca: { tipo: string; limite: string; validade: string; credito: string };
+}
+
+export function padraoVazio(nome: string, compassos = 1): Padrao {
+  const n = STEPS * compassos;
+  const vazio = () => Array<number>(n).fill(0);
   return {
     nome,
     bateria: { kick: vazio(), snare: vazio(), clap: vazio(), hat: vazio(), openhat: vazio(), perc: vazio() },
-    baixo: Array<number>(STEPS).fill(-1),
-    deslize: Array<boolean>(STEPS).fill(false),
-    melodia: Array.from({ length: LINHAS }, () => Array<boolean>(STEPS).fill(false)),
+    compassos,
+    baixo: Array<number>(n).fill(-1),
+    deslize: Array<boolean>(n).fill(false),
+    melodia: Array.from({ length: LINHAS }, () => Array<boolean>(n).fill(false)),
   };
 }
 
@@ -221,6 +260,8 @@ export function normalizar(p: Project): Project {
   p.ajusteDoMaster ??= { graveDb: 0, medioDb: 0, agudoDb: 0, largura: 1, alvoLufs: null };
   p.beat.cede ??= 1.5;
   p.letra ??= { texto: '', compasso: 1 };
+  p.lancamento ??= { artista: '', produtor: '', isrc: '', explicito: false, licenca: { tipo: '', limite: '', validade: '', credito: '' } };
+  p.beat.sidechain ??= true;
   for (const t of p.takes) {
     t.naMontagem ??= false;
     t.tune.intensidade ??= 1;
@@ -249,6 +290,41 @@ export const duracaoDoTrecho = (p: Project) => (p.montagem.compassos * 4 * 60) /
 
 export const compassosDoArranjo = (p: Project) => p.arranjo.reduce((n, b) => n + b.vezes, 0);
 
+/** Quantos passos um padrão tem. */
+export const passosDoPadrao = (padrao: Padrao) => STEPS * (padrao.compassos ?? 1);
+
+/** Muda o tamanho de um padrão; ao crescer, o conteúdo existente se repete. */
+export function redimensionar(padrao: Padrao, compassos: number) {
+  const n = STEPS * compassos;
+  const ajustar = <T>(a: T[]) => Array.from({ length: n }, (_, i) => a[i % a.length]);
+  for (const lane of LANES) padrao.bateria[lane.id] = ajustar(padrao.bateria[lane.id]);
+  padrao.baixo = ajustar(padrao.baixo);
+  padrao.deslize = ajustar(padrao.deslize);
+  padrao.melodia = padrao.melodia.map(ajustar);
+  padrao.compassos = compassos;
+}
+
+export interface PassoLocalizado {
+  padrao: Padrao;
+  bloco: Bloco;
+  /** Passo dentro do padrão. */
+  s: number;
+  /** Passos que faltam para o trecho acabar (contando este). */
+  restam: number;
+}
+
+/** A que trecho e a que passo do padrão corresponde um passo contado desde o início da música. */
+export function localizarPasso(p: Project, passo: number): PassoLocalizado | undefined {
+  let inicio = 0;
+  for (const bloco of p.arranjo) {
+    const fim = inicio + bloco.vezes * STEPS;
+    const padrao = p.padroes[bloco.padrao];
+    if (passo < fim) return padrao && { padrao, bloco, s: (passo - inicio) % passosDoPadrao(padrao), restam: fim - passo };
+    inicio = fim;
+  }
+  return undefined;
+}
+
 /** Qual padrão toca em um dado compasso da música. */
 export function padraoNoCompasso(p: Project, compasso: number): Padrao | undefined {
   let resto = compasso;
@@ -263,7 +339,8 @@ export function padraoNoCompasso(p: Project, compasso: number): Padrao | undefin
 export const usaTune = (take: Take) => take.tune.ligado || take.altura !== 0;
 
 /** O take precisa de processamento prévio (fora do tempo real): afinação ou limpeza. */
-export const usaProcessamento = (take: Take) => usaTune(take) || take.limpeza.gate < 0 || take.limpeza.deEsser > 0;
+export const usaProcessamento = (take: Take) =>
+  usaTune(take) || take.limpeza.gate < 0 || take.limpeza.deEsser > 0 || (take.limpeza.ruido ?? 0) > 0 || (take.limpeza.nivelar ?? 0) > 0;
 
 /** Qual buffer tocar para um take: a versão afinada, se existir, ou a original. */
 export function bufferDoTake(take: Take, buffers: Map<string, AudioBuffer>): AudioBuffer | undefined {
@@ -272,7 +349,7 @@ export function bufferDoTake(take: Take, buffers: Map<string, AudioBuffer>): Aud
 
 export function duracaoDaMusica(p: Project, buffers: Map<string, AudioBuffer>): number {
   const arquivo = p.beat.fonte === 'arquivo' && p.beat.audioId ? buffers.get(p.beat.audioId) : undefined;
-  let fim = arquivo ? arquivo.duration : (compassosDoArranjo(p) * 4 * 60) / p.bpm;
+  let fim = arquivo ? arquivo.duration / (p.beat.velocidade ?? 1) : (compassosDoArranjo(p) * 4 * 60) / p.bpm;
   for (const t of p.takes) {
     const b = buffers.get(t.audioId);
     if (b) fim = Math.max(fim, t.inicio + b.duration);

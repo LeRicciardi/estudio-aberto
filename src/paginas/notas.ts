@@ -2,12 +2,12 @@
 
 import { INSTRUMENTOS } from '../engine/synths.ts';
 import { engine, estado, id, mudou } from '../estado.ts';
-import { type InstrumentoId, NOTAS, STEPS } from '../model/project.ts';
+import { type InstrumentoId, NOTAS, type Padrao, nomeDoGrau, passosDoPadrao } from '../model/project.ts';
 import { avisar, secNotas } from '../moldura.ts';
 import { guardarAudio } from '../storage.ts';
 import { botao, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
-import { abasDePadrao, gradeDeNotas } from './grades.ts';
+import { abasDePadrao, dimensionar, gradeDeNotas } from './grades.ts';
 
 /** Trocar o 808 sintetizado por um sample do usuário, afinado pela nota em que foi gravado. */
 export function sample808(): HTMLElement {
@@ -45,14 +45,42 @@ export function sample808(): HTMLElement {
   );
 }
 
+const ACORDES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+let acordeEscolhido = 0;
+let tempoEscolhido = 0;
+
+/** Escreve um acorde (três notas, pulando uma linha entre elas) em um tempo do padrão. */
+function acordes(padrao: Padrao): HTMLElement {
+  const tempos = passosDoPadrao(padrao) / 4;
+  tempoEscolhido = Math.min(tempoEscolhido, tempos - 1);
+  return h('div', { className: 'linha' },
+    seletor('Acorde', ACORDES.map((nome, i) => [i, `${nome} (${nomeDoGrau(i, estado.projeto.tom, estado.projeto.escala)})`] as [number, string]), acordeEscolhido, (v) => { acordeEscolhido = v; }),
+    seletor('No tempo', Array.from({ length: tempos }, (_, i) => [i, `${Math.floor(i / 4) + 1}.${(i % 4) + 1}`] as [number, string]), tempoEscolhido, (v) => { tempoEscolhido = v; }),
+    botao('Escrever acorde', () => {
+      const s = tempoEscolhido * 4;
+      for (const linha of padrao.melodia) linha[s] = false;
+      // Tônica, terça e quinta do acorde; o que passar da última linha desce uma oitava.
+      for (const salto of [0, 2, 4]) padrao.melodia[(acordeEscolhido + salto) % 7][s] = true;
+      mudou();
+      desenharBeat();
+    }),
+    explicacao([
+      'Um acorde são três notas da escala tocadas juntas, pulando uma entre elas. O número romano diz em que nota da escala ele começa.',
+      'Em tom menor, I, VI, III e VII (nessa ordem, um por compasso) formam a progressão mais usada no trap e no R&B. Em tom maior, experimente I, V, VI, IV.',
+    ]),
+  );
+}
+
 export function desenharNotas() {
   if (estado.projeto.beat.fonte === 'arquivo') {
     secNotas.replaceChildren(h('h2', {}, 'Notas'), h('p', { className: 'nota' }, 'Esta página edita o 808 e a melodia de um beat criado aqui. Com um beat importado, ela não é usada.'));
     return;
   }
   const padrao = estado.projeto.padroes[estado.padraoAtual];
+  const passos = passosDoPadrao(padrao);
   const linhaDeDeslize = h('div', { className: 'grade' }, h('span', { className: 'nome-linha' }, 'Deslizar'));
-  for (let s = 0; s < STEPS; s++) {
+  dimensionar(linhaDeDeslize, passos);
+  for (let s = 0; s < passos; s++) {
     const b = h('button', { className: 'passo deslize' + (padrao.deslize[s] ? ' ligado' : ''), ariaLabel: `Deslizar no passo ${s + 1}` });
     b.onclick = () => {
       padrao.deslize[s] = !padrao.deslize[s];
@@ -84,6 +112,7 @@ export function desenharNotas() {
       'Deslizar: a nota começa na altura da anterior e escorrega até a nova. É a marca do drill e do trap.',
     ]),
     h('h3', {}, 'Melodia'),
+    acordes(padrao),
     h('div', { className: 'linha' },
       seletor<InstrumentoId>('Instrumento', opcoes(INSTRUMENTOS, (k) => INSTRUMENTOS[k]), estado.projeto.instrumento, (v) => { estado.projeto.instrumento = v; }),
       deslizante('Volume', 0, 1.2, 0.01, estado.projeto.volumes.melodia, (v) => { estado.projeto.volumes.melodia = v; }),

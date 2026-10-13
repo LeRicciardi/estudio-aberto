@@ -1,13 +1,14 @@
 // Página Voz: escolha do take, telas de efeito e processamento prévio.
 
-import { exportarMix } from '../engine/engine.ts';
+import { sugerirAjustes } from '../engine/diagnostico.ts';
+import { exportarMix, paraWav } from '../engine/engine.ts';
 import { processarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { PRESETS_VOZ, aplicarTimbre } from '../engine/vocalChain.ts';
 import { afinadoCom, av, engine, estado, mudou, projetoParaTocar, so } from '../estado.ts';
-import { NOTAS, type PresetVoz, type Take, usaProcessamento, usaTune } from '../model/project.ts';
+import { NOTAS, type PresetVoz, type Project, type Take, usaProcessamento, usaTune } from '../model/project.ts';
 import { avisar, secVozes } from '../moldura.ts';
 import { reiniciarSeTocando } from '../transporte.ts';
-import { botao, campo, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
+import { baixar, botao, campo, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
 import { TELAS, telaDeEfeito } from '../ui/efeitos.ts';
 import { desenharGravar } from './gravar.ts';
 import { desenharMixer } from './mixer.ts';
@@ -18,19 +19,30 @@ import { onda } from './onda.ts';
 export async function reafinar(take: Take) {
   const chave = take.audioId + ':tune';
   const original = engine.buffers.get(take.audioId);
-  if (!usaProcessamento(take) || !original) return;
+  if ((!usaProcessamento(take) && !take.harmonia?.quanto) || !original) return;
   // Com o tune desligado, só a mudança de altura é aplicada (intensidade 0).
   const intensidade = take.tune.ligado ? take.tune.intensidade : 0;
   const tune = usaTune(take)
     ? { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: take.tune.velocidade, intensidade, transpor: take.altura }
     : undefined;
-  const ajustes = JSON.stringify([tune, take.limpeza]);
-  if (afinadoCom.get(take.audioId) === ajustes && engine.buffers.has(chave)) return;
+  const limpeza = { gate: take.limpeza.gate, deEsser: take.limpeza.deEsser, ruido: take.limpeza.ruido ?? 0, nivelar: take.limpeza.nivelar ?? 0 };
+  const harmonia = take.harmonia?.quanto ? take.harmonia.graus : 0;
+  const ajustes = JSON.stringify([tune, limpeza, harmonia]);
+  if (afinadoCom.get(take.audioId) === ajustes) return;
   avisar(`Processando ${take.nome}...`);
-  const pronto = await processarEmSegundoPlano(original.getChannelData(0), original.sampleRate, { gate: take.limpeza.gate, deEsser: take.limpeza.deEsser, tune });
-  const buffer = engine.ctx.createBuffer(1, pronto.length, original.sampleRate);
-  buffer.copyToChannel(pronto, 0);
-  engine.buffers.set(chave, buffer);
+  const guardar = (sufixo: string, dados: Float32Array) => {
+    const buffer = engine.ctx.createBuffer(1, dados.length, original.sampleRate);
+    buffer.copyToChannel(dados, 0);
+    engine.buffers.set(take.audioId + sufixo, buffer);
+  };
+  if (usaProcessamento(take)) guardar(':tune', await processarEmSegundoPlano(original.getChannelData(0), original.sampleRate, { ...limpeza, tune }));
+  else engine.buffers.delete(chave);
+  // Harmonia: a mesma gravação limpa, afinada firme e deslocada alguns graus da escala.
+  if (harmonia) {
+    guardar(':harm', await processarEmSegundoPlano(original.getChannelData(0), original.sampleRate, {
+      ...limpeza, tune: { tom: estado.projeto.tom, escala: estado.projeto.escala, velocidade: 0.1, intensidade: 1, transpor: take.altura, graus: harmonia },
+    }));
+  }
   afinadoCom.set(take.audioId, ajustes);
   avisar(take.tune.ligado ? `${take.nome} afinado em ${NOTAS[estado.projeto.tom]} ${estado.projeto.escala}.` : `${take.nome} processado.`);
   reiniciarSeTocando();
@@ -53,6 +65,64 @@ export async function conferirEquilibrio() {
     : diferenca > 6 ? `A voz está ${Math.round(diferenca)} dB acima do beat e soa descolada dele. Baixe um pouco a voz ou suba o beat.`
     : 'Voz e beat estão equilibrados: a voz aparece sem se descolar do beat.',
   );
+}
+
+/** Mede a gravação e regula os efeitos para ela, explicando cada mudança. */
+function ajustarAoTake(take: Take) {
+  const original = engine.buffers.get(take.audioId);
+  if (!original) return;
+  const s = sugerirAjustes(original.getChannelData(0), original.sampleRate);
+  take.edicao.ganhoDb = s.ganhoDb;
+  take.eq.corte = s.corte;
+  take.eq.graveDb = s.graveDb;
+  take.eq.arDb = Math.max(take.eq.arDb, s.arDb);
+  take.comp.limiar = s.limiar;
+  take.limpeza.deEsser = Math.max(take.limpeza.deEsser, s.deEsser);
+  if (s.gate) take.limpeza.gate = s.gate;
+  mudou();
+  desenharVozes();
+  void reafinar(take);
+  avisar(`${take.nome} ajustado. ${s.motivos.join(' ')}`);
+}
+
+/**
+ * Papel do take na música. A voz principal fica no centro e na frente;
+ * dobras e adlibs ficam mais baixos, nos lados e com mais espaço.
+ */
+function definirPapel(take: Take, papel: 'principal' | 'dobra' | 'adlib') {
+  const outros = estado.projeto.takes.filter((t) => t !== take && Math.abs(t.pan) > 0.2).length;
+  const lado = outros % 2 ? 0.6 : -0.6;
+  if (papel === 'principal') Object.assign(take, { pan: 0, volume: 0.9, telefone: false, dobra: 0 });
+  if (papel === 'dobra') Object.assign(take, { pan: lado, volume: 0.45, telefone: false, reverb: Math.max(take.reverb, 0.15) });
+  if (papel === 'adlib') {
+    Object.assign(take, { pan: lado * 1.2, volume: 0.5, reverb: Math.max(take.reverb, 0.25), delay: Math.max(take.delay, 0.2), ecoNoFim: false });
+    take.eq.corte = Math.max(take.eq.corte, 200);
+  }
+  mudou();
+  desenharVozes();
+  avisar({ principal: 'Voz principal: no centro e na frente.', dobra: 'Dobra: mais baixa e para um lado, engordando a principal.', adlib: 'Adlib: no lado, com menos grave, mais reverb e eco.' }[papel]);
+}
+
+/** Exporta só este take, curto, em duas versões: seca e com os efeitos. Serve para vinhetas e tags de DJ. */
+async function exportarVinheta(take: Take) {
+  const p = estado.projeto;
+  const so = (cru: boolean): Project => ({
+    ...p,
+    beat: { ...p.beat, volume: 0 },
+    volumes: { bateria: 0, baixo: 0, melodia: 0 },
+    master: 'limpo',
+    ajusteDoMaster: { ...p.ajusteDoMaster, alvoLufs: -14 },
+    montagem: { ...p.montagem, ligada: false },
+    takes: [cru
+      ? { ...take, inicio: 0, mudo: false, preset: 'cru', reverb: 0, delay: 0, distorcao: 0, telefone: false, dobra: 0, eq: { corte: 60, graveDb: 0, medioHz: 3000, medioDb: 0, arDb: 0 }, comp: { limiar: -18, razao: 3, ataque: 5, soltura: 120, ganho: 0 } }
+      : { ...take, inicio: 0, mudo: false }],
+  });
+  avisar('Exportando a vinheta...');
+  for (const [cru, sufixo] of [[true, 'seca'], [false, 'com efeito']] as const) {
+    const r = await exportarMix(so(cru), engine.buffers, 'tudo');
+    baixar(paraWav(r.audio), `${take.nome} (vinheta ${sufixo}).wav`);
+  }
+  avisar('Vinheta exportada em duas versões: seca, para tratar depois, e com efeito, pronta para usar.');
 }
 
 export function desenharVozes() {
@@ -135,6 +205,13 @@ export function desenharVozes() {
     h('div', { className: 'linha' }, nome, mudo, apagar),
     onda(take),
     h('div', { className: 'linha' }, comparar, botao('Conferir equilíbrio voz × beat', () => void conferirEquilibrio())),
+    h('div', { className: 'linha' },
+      Object.assign(botao('Ajustar ao meu take', () => ajustarAoTake(take), 'principal'), { title: 'Mede esta gravação e regula equalizador, compressor e limpeza para ela' }),
+      botao('Principal', () => definirPapel(take, 'principal')),
+      botao('Dobra', () => definirPapel(take, 'dobra')),
+      botao('Adlib', () => definirPapel(take, 'adlib')),
+      av(botao('Exportar como vinheta', () => void exportarVinheta(take))),
+    ),
 
     // Tela simples: poucas decisões, por intenção.
     so(seletor<PresetVoz>('Timbre', opcoes(PRESETS_VOZ, (k) => PRESETS_VOZ[k].nome), take.preset, (v) => {

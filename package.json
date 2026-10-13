@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "publicar": "sh scripts/publicar.sh",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --no-warnings src/engine/tune.test.ts && node --experimental-strip-types --no-warnings src/engine/limiter.test.ts && node --experimental-strip-types --no-warnings src/engine/medidas.test.ts && node --experimental-strip-types --no-warnings src/engine/analise.test.ts && node --experimental-strip-types --no-warnings src/engine/limpeza.test.ts && node --experimental-strip-types --no-warnings src/engine/diagnostico.test.ts"
+    "test": "node --experimental-strip-types --no-warnings src/engine/tune.test.ts && node --experimental-strip-types --no-warnings src/engine/limiter.test.ts && node --experimental-strip-types --no-warnings src/engine/medidas.test.ts && node --experimental-strip-types --no-warnings src/engine/analise.test.ts && node --experimental-strip-types --no-warnings src/engine/limpeza.test.ts && node --experimental-strip-types --no-warnings src/engine/diagnostico.test.ts && node --experimental-strip-types --no-warnings src/engine/entrega.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

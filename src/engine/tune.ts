@@ -99,6 +99,17 @@ export function notaAlvo(midi: number, tom: number, escala: EscalaTune): number 
   return melhor;
 }
 
+/** Sobe ou desce uma nota da escala por `graus` degraus da própria escala (2 = uma terça). */
+export function grauMais(midi: number, tom: number, escala: EscalaTune, graus: number): number {
+  const lista = GRAUS[escala];
+  let nota = midi;
+  for (let k = 0; k < Math.abs(graus); k++) {
+    do nota += Math.sign(graus);
+    while (!lista.includes((((nota - tom) % 12) + 12) % 12));
+  }
+  return nota;
+}
+
 export interface OpcoesTune {
   tom: number;
   escala: EscalaTune;
@@ -108,6 +119,8 @@ export interface OpcoesTune {
   intensidade?: number;
   /** Semitons somados à voz inteira (voz mais grossa ou mais fina). Padrão 0. */
   transpor?: number;
+  /** Harmonia: desloca cada nota este número de graus da escala (2 = terça acima). Padrão 0. */
+  graus?: number;
 }
 
 export function afinar(x: Float32Array, taxa: number, op: OpcoesTune): Float32Array {
@@ -126,7 +139,8 @@ export function afinar(x: Float32Array, taxa: number, op: OpcoesTune): Float32Ar
   for (let q = 0; q < quadros; q++) {
     if (f0[q] > 0) {
       const midi = paraMidi(f0[q]);
-      const alvo = midi + (notaAlvo(midi, op.tom, op.escala) - midi) * intensidade;
+      const naEscala = notaAlvo(midi, op.tom, op.escala);
+      const alvo = op.graus ? grauMais(naEscala, op.tom, op.escala, op.graus) : midi + (naEscala - midi) * intensidade;
       // No começo de cada nota parte da altura cantada; depois persegue o alvo.
       saida = cantando ? saida + (alvo - saida) * suavizacao : midi + (alvo - midi) * suavizacao;
       cantando = true;

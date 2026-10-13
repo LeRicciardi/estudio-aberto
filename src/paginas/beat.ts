@@ -3,7 +3,7 @@
 import { KITS } from '../engine/synths.ts';
 import { analisarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { av, engine, estado, id, mudou, relogio } from '../estado.ts';
-import { type Escala, type KitId, LANES, type LaneId, NOTAS, PREFIXO_DE_FABRICA, SAMPLES_DE_FABRICA, STEPS } from '../model/project.ts';
+import { type Escala, type KitId, LANES, type LaneId, NOTAS, PREFIXO_DE_FABRICA, SAMPLES_DE_FABRICA, STEPS, passosDoPadrao, redimensionar } from '../model/project.ts';
 import { avisar, secCanais } from '../moldura.ts';
 import { guardarAudio } from '../storage.ts';
 import { parar, reiniciarSeTocando } from '../transporte.ts';
@@ -16,7 +16,8 @@ import { reafinarTodos } from './voz.ts';
 
 /** Redesenha as três páginas do beat: Beat, Notas e Arranjo. */
 export function desenharBeat() {
-  estado.colunas = Array.from({ length: STEPS }, () => []);
+  const aberto = estado.projeto.padroes[estado.padraoAtual];
+  estado.colunas = Array.from({ length: aberto ? passosDoPadrao(aberto) : STEPS }, () => []);
   desenharCanais();
   desenharNotas();
   desenharArranjo();
@@ -41,6 +42,12 @@ function desenharCanais() {
     mudou();
     reiniciarSeTocando();
   };
+  const caixaSidechain = h('input', { type: 'checkbox', checked: beat.sidechain ?? true });
+  caixaSidechain.onchange = () => {
+    beat.sidechain = caixaSidechain.checked;
+    mudou();
+  };
+  const sidechain = h('label', { className: 'caixa' }, caixaSidechain, 'O 808 abaixa a cada bumbo');
   const espaco = h('div', { className: 'linha' },
     h('label', { className: 'caixa' }, caixaEspaco, 'O beat abre espaço quando a voz entra'),
     av(deslizante(`Quanto o beat abaixa com a voz (dB)`, 0, 6, 0.5, beat.cede, (v) => { beat.cede = v; }, reiniciarSeTocando)),
@@ -64,6 +71,11 @@ function desenharCanais() {
         seletor('Tom do beat', NOTAS.map((n, i) => [i, n] as [number, string]), estado.projeto.tom, (v) => { estado.projeto.tom = v; desenharEstilo(); void reafinarTodos(); }),
         seletor<Escala>('Escala', [['menor', 'Menor'], ['maior', 'Maior']], estado.projeto.escala, (v) => { estado.projeto.escala = v; desenharEstilo(); void reafinarTodos(); }),
       ),
+      av(deslizante(`Velocidade do beat: ${Math.round((beat.velocidade ?? 1) * 100)}% (${Math.round(estado.projeto.bpm)} BPM informado)`, 0.8, 1.25, 0.01, beat.velocidade ?? 1, (v) => { beat.velocidade = v; }, () => {
+        desenharBeat();
+        reiniciarSeTocando();
+      })),
+      av(h('p', { className: 'nota' }, 'Mudar a velocidade também muda o tom, como num toca-discos: mais rápido fica mais agudo. Depois de mexer, confira o BPM e o tom acima.')),
       h('p', { className: 'nota' }, 'O delay usa o BPM e o tune usa o tom. Com eles errados, o eco sai fora do tempo e a afinação puxa para notas erradas.'),
       volume,
       espaco,
@@ -108,6 +120,11 @@ function desenharCanais() {
     av(h('div', { className: 'linha' }, campo('Nome do padrão', nomeDoPadrao), apagar)),
     h('h3', {}, 'Bateria'),
     h('div', { className: 'linha' },
+      av(seletor('Tamanho do padrão', [[1, '1 compasso'], [2, '2 compassos'], [4, '4 compassos']] as [number, string][], padrao.compassos ?? 1, (v) => {
+        redimensionar(padrao, v);
+        desenharBeat();
+        reiniciarSeTocando();
+      })),
       seletor<KitId>('Kit', opcoes(KITS, (k) => KITS[k].nome), estado.projeto.kit, (v) => { estado.projeto.kit = v; }),
       deslizante('Volume', 0, 1.2, 0.01, estado.projeto.volumes.bateria, (v) => { estado.projeto.volumes.bateria = v; }),
     ),
@@ -119,6 +136,15 @@ function desenharCanais() {
       'Fraco: toca baixinho. Notas fracas entre as fortes dão balanço.',
       'Rolo: repete o som 2, 3 ou 4 vezes dentro de um quadrado. É o chimbal acelerado do trap.',
     ]),
+    av(h('h3', {}, 'Peso')),
+    av(h('div', { className: 'linha' },
+      deslizante('Estourar o beat', 0, 1, 0.05, beat.estourar ?? 0, (v) => { beat.estourar = v; }),
+      sidechain,
+    )),
+    av(explicacao([
+      'Estourar: empurra o beat inteiro contra um limite, distorcendo de propósito. É o som do mandelão e da bruxaria. Um pouco já engorda qualquer beat.',
+      'O 808 abaixa a cada bumbo: os dois ocupam o mesmo grave, e sem isso viram uma massa só. Com isso o bumbo bate e o 808 volta logo atrás.',
+    ])),
     volume,
     espaco,
   );

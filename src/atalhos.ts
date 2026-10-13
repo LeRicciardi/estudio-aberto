@@ -1,10 +1,10 @@
 // Uso no computador: atalhos de teclado e arrastar arquivos para a janela.
 
 import { abrirDeArquivo, salvarEmArquivo } from './arquivo.ts';
-import { engine } from './estado.ts';
+import { engine, estado } from './estado.ts';
 import { avisar } from './moldura.ts';
 import { importarBeat } from './paginas/beat.ts';
-import { alternarGravacao } from './paginas/gravar.ts';
+import { alternarGravacao, importarVoz } from './paginas/gravar.ts';
 import { alternarTocar, irPara, irParaEtapa, irParaPagina, navegarHistorico } from './transporte.ts';
 
 export const ATALHOS: [string, string][] = [
@@ -74,6 +74,10 @@ window.addEventListener('drop', (e) => {
   const arquivo = e.dataTransfer?.files[0];
   if (!arquivo) return;
   if (arquivo.name.endsWith('.json')) void abrirDeArquivo(arquivo);
-  else if (arquivo.type.startsWith('audio/')) void importarBeat(arquivo).then(() => irParaPagina('canais'));
+  else if (arquivo.type.startsWith('audio/') || /\.(opus|ogg|m4a)$/i.test(arquivo.name)) {
+    // Nas páginas de voz o áudio solto vira um take; nas outras, vira o beat.
+    if (estado.pagina === 'gravar' || estado.pagina === 'efeitos') void importarVoz(arquivo);
+    else void importarBeat(arquivo).then(() => irParaPagina('canais'));
+  }
   else avisar('Solte um arquivo de áudio (para usar como beat) ou um projeto .estudio.json.');
 });

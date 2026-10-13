@@ -1,11 +1,11 @@
 // Telas de efeito de um take de voz, uma por ferramenta, no formato de um
 // aparelho com botões giratórios: afinação, equalizador, compressor, espaço,
 // caráter, limpeza e edição.
+import { PRESETS_VOZ, TAMANHOS_DE_REVERB, aplicarTimbre, curvaDoEq } from '../engine/vocalChain.ts';
+import { type DivisaoDelay, NOTAS, type PresetVoz, type Project, type Take, type TamanhoReverb } from '../model/project.ts';
+import { botao, chave, explicacao, giratorio, h, numero, opcoes, seletor } from './controles.ts';
 
 import type { Engine } from '../engine/engine.ts';
-import { PRESETS_VOZ, TAMANHOS_DE_REVERB, aplicarTimbre, curvaDoEq } from '../engine/vocalChain.ts';
-import { NOTAS, type DivisaoDelay, type PresetVoz, type Project, type Take, type TamanhoReverb } from '../model/project.ts';
-import { botao, chave, explicacao, giratorio, h, numero, opcoes, seletor } from './controles.ts';
 
 export const TELAS = ['Afinação', 'Equalizador', 'Compressor', 'Espaço', 'Caráter', 'Limpeza', 'Edição'] as const;
 export type Tela = (typeof TELAS)[number];
@@ -136,18 +136,27 @@ function compressor(take: Take, c: Contexto): HTMLElement {
       giratorio({ rotulo: 'Soltura', min: 20, max: 500, log: true, valor: k.soltura, padrao: 120, formato: (v) => `${v.toFixed(0)} ms`, aoMudar: (v) => { k.soltura = v; } }),
       giratorio({ rotulo: 'Ganho', min: 0, max: 18, valor: k.ganho, padrao: 0, formato: db, aoMudar: (v) => { k.ganho = v; } }),
     ),
+    fileira(
+      chave('Compressão dupla', !!k.dupla, (v) => {
+        k.dupla = v;
+        c.redesenhar();
+      }),
+      giratorio({ rotulo: 'Paralela', min: 0, max: 1, valor: k.paralela ?? 0, padrao: 0, formato: pct, aoMudar: (v) => { k.paralela = v; } }),
+    ),
     explicacao([
       'O compressor abaixa as partes mais altas da voz, aproximando o volume das fracas e das fortes. Assim a voz não some no beat nem estoura.',
       'Limiar: a partir de que volume ele começa a agir. Mais baixo, age em mais trechos.',
       'Razão: o quanto ele segura. 2:1 é suave; 4:1 é o comum em rap; 8:1 ou mais deixa a voz "parada no lugar".',
       'Ataque: quanto demora para agir. Rápido segura as consoantes; lento deixa o começo das palavras bater.',
       'Soltura: quanto demora para soltar depois que o volume cai.',
+      'Compressão dupla: liga um segundo compressor, lento, depois do primeiro. O primeiro segura os picos e o segundo alisa o volume geral; dois agindo pouco soam mais naturais que um agindo muito.',
+      'Paralela: mistura por baixo uma cópia bem esmagada da voz. Dá corpo e constância sem tirar a vida da voz original. De 20 a 30% é o usual.',
       'Ganho: devolve o volume perdido na compressão. Use a barra de redução como guia: 3 a 8 dB nas partes altas é um bom ponto de partida.',
     ]),
   );
 }
 
-function espaco(take: Take): HTMLElement {
+function espaco(take: Take, c: Contexto): HTMLElement {
   return aparelho('Espaço: reverb, delay e dobra',
     fileira(
       giratorio({ rotulo: 'Reverb', min: 0, max: 0.8, valor: take.reverb, padrao: 0.1, formato: pct, aoMudar: (v) => { take.reverb = v; } }),
@@ -159,11 +168,24 @@ function espaco(take: Take): HTMLElement {
       seletor<DivisaoDelay>('Tempo do eco', [[4, '1 batida'], [8, '1/2 batida'], [16, '1/4 de batida']], take.divisaoDelay, (v) => { take.divisaoDelay = v; }),
     ),
     fileira(
+      chave('Eco só no fim da frase', !!take.ecoNoFim, (v) => {
+        take.ecoNoFim = v;
+        c.redesenhar();
+      }),
       giratorio({ rotulo: 'Dobra estéreo', min: 0, max: 1, valor: take.dobra, padrao: 0, formato: pct, aoMudar: (v) => { take.dobra = v; } }),
+    ),
+    fileira(
+      giratorio({ rotulo: 'Harmonia', min: 0, max: 1, valor: take.harmonia?.quanto ?? 0, padrao: 0, formato: (v) => (v === 0 ? 'Desligada' : pct(v)), aoMudar: (v) => { take.harmonia = { graus: take.harmonia?.graus ?? 2, quanto: v }; }, aoSoltar: () => c.reprocessar(take) }),
+      seletor('Voz da harmonia', [[2, 'Terça acima'], [-2, 'Terça abaixo'], [4, 'Quinta acima'], [-3, 'Quarta abaixo'], [7, 'Oitava acima']] as [number, string][], take.harmonia?.graus ?? 2, (v) => {
+        take.harmonia = { quanto: take.harmonia?.quanto ?? 0, graus: v };
+        c.reprocessar(take);
+      }),
     ),
     explicacao([
       'Reverb simula o som de um ambiente. Quarto deixa a voz próxima; salão deixa distante e grandiosa. Em excesso, embola a letra.',
       'Delay repete a voz em eco, no tempo do beat. "Repetições" define quantas vezes o eco volta antes de sumir.',
+      'Eco só no fim da frase: o delay fica fechado e abre apenas na última palavra de cada frase, que ecoa no espaço seguinte. É uma assinatura do trap; o botão Delay define a força.',
+      'Harmonia cria uma segunda voz a partir da sua, cantando outras notas da mesma escala. Uma terça acima, baixinha, enche um refrão.',
       'Dobra estéreo cria duas cópias levemente atrasadas da voz, uma de cada lado. A voz fica larga, como se tivesse sido gravada mais de uma vez. Boa em refrões.',
     ]),
   );
@@ -206,10 +228,16 @@ function limpeza(take: Take, c: Contexto): HTMLElement {
         : '',
       giratorio({ rotulo: 'De-esser', min: 0, max: 1, valor: l.deEsser, padrao: 0, formato: (v) => (v === 0 ? 'Desligado' : pct(v)), aoMudar: (v) => { l.deEsser = v; }, aoSoltar: refazer }),
     ),
+    fileira(
+      giratorio({ rotulo: 'Redução de ruído', min: 0, max: 1, valor: l.ruido ?? 0, padrao: 0, formato: (v) => (v === 0 ? 'Desligada' : pct(v)), aoMudar: (v) => { l.ruido = v; }, aoSoltar: refazer }),
+      giratorio({ rotulo: 'Nivelar frases', min: 0, max: 1, valor: l.nivelar ?? 0, padrao: 0, formato: (v) => (v === 0 ? 'Desligado' : pct(v)), aoMudar: (v) => { l.nivelar = v; }, aoSoltar: refazer }),
+    ),
     explicacao([
       'Gate: abafa o que sobra entre as frases, como chiado, ventilador e barulho de casa. Suba o limiar até o ruído sumir; se começar a comer o fim das palavras, baixe um pouco.',
       'De-esser: segura os "s" e "ch" quando ficam ardidos, sem escurecer o resto da voz. Costuma ser necessário depois de aumentar o "Ar" no equalizador.',
-      'A limpeza é aplicada antes do tune e dos outros efeitos.',
+      'Redução de ruído: tira o chiado contínuo que fica por baixo da voz (ventilador, ruído do celular). Use o mínimo que resolver; em excesso a voz fica "aguada".',
+      'Nivelar frases: mede o volume de cada frase e aproxima todas do volume típico, como um engenheiro faz à mão antes de comprimir. Assim o compressor trabalha menos e soa mais natural.',
+      'A limpeza é aplicada antes do tune e dos outros efeitos, nesta ordem: ruído, gate, nivelamento, de-esser.',
     ]),
   );
 }
@@ -248,7 +276,7 @@ export function telaDeEfeito(tela: Tela, take: Take, c: Contexto): HTMLElement {
     case 'Afinação': return afinacao(take, c);
     case 'Equalizador': return equalizador(take, c);
     case 'Compressor': return compressor(take, c);
-    case 'Espaço': return espaco(take);
+    case 'Espaço': return espaco(take, c);
     case 'Caráter': return carater(take, c);
     case 'Limpeza': return limpeza(take, c);
     case 'Edição': return edicao(take, c);

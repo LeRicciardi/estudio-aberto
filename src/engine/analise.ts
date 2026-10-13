@@ -126,3 +126,47 @@ export function avisoDeNivel(x: Float32Array): string | null {
   if (picoDb < -24) return 'A voz ficou bem baixa. Chegue mais perto do microfone; gravação baixa traz chiado junto quando aumenta.';
   return null;
 }
+
+export interface Ambiente {
+  /** Ruído de fundo em dB (0 = máximo). */
+  ruidoDb: number;
+  /** Tempo, em segundos, que o som de uma palma leva para cair 20 dB; null se não houve palma. */
+  eco: number | null;
+  avisos: string[];
+}
+
+/**
+ * Avalia o lugar de gravação a partir de alguns segundos de silêncio com uma
+ * palma no meio: o silêncio mostra o ruído de fundo, e o tempo que a palma
+ * leva para sumir mostra o quanto a sala ecoa.
+ */
+export function analisarAmbiente(x: Float32Array, taxa: number): Ambiente {
+  const bloco = Math.round(taxa * 0.01);
+  const n = Math.floor(x.length / bloco);
+  const nivel: number[] = [];
+  for (let b = 0; b < n; b++) {
+    let s = 0;
+    for (let i = b * bloco; i < (b + 1) * bloco; i++) s += x[i] * x[i];
+    nivel.push(10 * Math.log10(s / bloco + 1e-12));
+  }
+  const ordenado = [...nivel].sort((a, b) => a - b);
+  const ruidoDb = ordenado[Math.floor(n * 0.2)] ?? -90;
+  const pico = nivel.indexOf(Math.max(...nivel));
+  let eco: number | null = null;
+  if (nivel[pico] > ruidoDb + 30) {
+    for (let b = pico; b < n; b++) {
+      if (nivel[b] <= nivel[pico] - 20) {
+        eco = (b - pico) * 0.01;
+        break;
+      }
+    }
+  }
+  const avisos: string[] = [];
+  if (ruidoDb > -45) avisos.push('O lugar está barulhento. Desligue ventilador, ar-condicionado e TV, feche a janela, ou ligue a redução de ruído depois de gravar.');
+  else if (ruidoDb > -55) avisos.push('Há um pouco de ruído de fundo. Dá para gravar; o gate limpa o que sobrar entre as frases.');
+  if (eco === null) avisos.push('Não ouvi a palma, então não deu para medir o eco. Tente de novo batendo uma palma forte.');
+  else if (eco > 0.25) avisos.push('A sala ecoa bastante. Grave de frente para um guarda-roupa aberto, ou com um edredom grosso atrás de você: o eco da sala não sai depois.');
+  else if (eco > 0.12) avisos.push('A sala tem um pouco de eco. Chegar mais perto do microfone (um palmo) já diminui.');
+  if (!avisos.length) avisos.push('Lugar bom para gravar: pouco ruído e pouco eco.');
+  return { ruidoDb, eco, avisos };
+}

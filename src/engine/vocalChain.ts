@@ -138,6 +138,8 @@ export interface CadeiaDeVoz {
   saida: AudioNode;
   /** O compressor, exposto para a tela mostrar quanto ele está reduzindo. */
   compressor: DynamicsCompressorNode;
+  /** Quanto da voz vai para o delay; a mesa automatiza isso no "eco só no fim da frase". */
+  mandadaDelay: GainNode;
   /** Aplica ao vivo os ajustes do take que não exigem remontar a cadeia. */
   ajustar(take: Take): void;
   desligar(): void;
@@ -199,8 +201,24 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
   const medio = filtro('peaking', 3000);
   const ar = filtro('highshelf', 9000);
 
+  const equalizada = fim;
   const compressor = ligar(ctx.createDynamicsCompressor());
+  // Segundo compressor, lento: o primeiro segura os picos e este alisa o
+  // volume geral. Dois agindo pouco soam mais naturais que um agindo muito.
+  const segundo = ligar(ctx.createDynamicsCompressor());
+  segundo.attack.value = 0.03;
+  segundo.release.value = 0.3;
   const compensa = ligar(ctx.createGain());
+  // Compressão paralela: uma cópia esmagada da voz, misturada por baixo.
+  // Dá corpo e constância sem tirar a vida da voz original.
+  const esmagada = ctx.createDynamicsCompressor();
+  esmagada.threshold.value = -38;
+  esmagada.ratio.value = 12;
+  esmagada.attack.value = 0.002;
+  esmagada.release.value = 0.08;
+  const paralela = ctx.createGain();
+  equalizada.connect(esmagada).connect(paralela).connect(compensa);
+  nos.push(esmagada, paralela);
 
   if (r.forca > 0) saturar(r.forca);
   if (take.distorcao > 0) saturar(1 + take.distorcao * 11);
@@ -256,16 +274,23 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
     compressor.ratio.value = t.comp.razao;
     compressor.attack.value = t.comp.ataque / 1000;
     compressor.release.value = t.comp.soltura / 1000;
+    segundo.threshold.value = t.comp.dupla ? Math.min(0, t.comp.limiar + 8) : 0;
+    segundo.ratio.value = t.comp.dupla ? 2 : 1;
+    paralela.gain.value = (t.comp.paralela ?? 0) * 0.7;
     compensa.gain.value = 10 ** (t.comp.ganho / 20);
     dobra.gain.value = t.dobra * 0.6;
     mandadaReverb.gain.value = t.reverb;
-    mandadaDelay.gain.value = t.delay;
+    // No "eco só no fim da frase" quem controla a mandada é a mesa, com uma curva.
+    if (!t.ecoNoFim) {
+      mandadaDelay.gain.cancelScheduledValues(0);
+      mandadaDelay.gain.setValueAtTime(t.delay, 0);
+    }
     realimentacao.gain.value = t.repeticoes;
   };
   ajustar(take);
 
   return {
-    entrada, saida, compressor, ajustar,
+    entrada, saida, compressor, mandadaDelay, ajustar,
     desligar: () => {
       balanco.stop();
       nos.forEach((n) => n.disconnect());

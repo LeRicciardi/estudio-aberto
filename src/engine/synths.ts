@@ -264,6 +264,7 @@ export const INSTRUMENTOS: Record<InstrumentoId, string> = {
   pluck: 'Pluck (corda curta)',
   pad: 'Pad (cama de fundo)',
   lead: 'Sintetizador sujo',
+  tuin: 'Tuin (agudo do funk)',
 };
 
 /** `passo` é a duração de um passo em segundos; notas longas usam isso. */
@@ -307,6 +308,21 @@ export function tocarNota(ctx: BaseAudioContext, destino: AudioNode, inst: Instr
       oscilador(ctx, 'sawtooth', hz * 1.004, t, dur + 0.5).connect(f);
       break;
     }
+    case 'tuin': {
+      // Agudo que "morde": a nota entra abaixo e sobe num instante, com um
+      // tremor rápido. Tocado duas oitavas acima da grade.
+      const o = oscilador(ctx, 'sine', hz * 4, t, 0.35);
+      o.frequency.setValueAtTime(hz * 2.6, t);
+      o.frequency.exponentialRampToValueAtTime(hz * 4, t + 0.035);
+      const tremor = oscilador(ctx, 'sine', 28, t, 0.35);
+      const quanto = ctx.createGain();
+      quanto.gain.value = hz * 0.08;
+      tremor.connect(quanto).connect(o.frequency);
+      const vol = ctx.createGain();
+      vol.gain.value = 0.22;
+      o.connect(envelope(ctx, t, 0.6, 0.3)).connect(saturador(ctx, 3)).connect(vol).connect(destino);
+      break;
+    }
     case 'lead': {
       // Quadrada + serra passando por distorção forte: áspero e agressivo.
       const env = envelope(ctx, t, 0.5, 0.28);
@@ -318,4 +334,24 @@ export function tocarNota(ctx: BaseAudioContext, destino: AudioNode, inst: Instr
       break;
     }
   }
+}
+
+/**
+ * Virada: efeito de um compasso que prepara a entrada do trecho seguinte.
+ * "subida" é um chiado que vai ficando agudo e forte; "crash" é o som de um
+ * prato tocado ao contrário, crescendo até cortar.
+ */
+export function tocarVirada(ctx: BaseAudioContext, destino: AudioNode, tipo: 'subida' | 'crash', t: number, dur: number) {
+  const fonte = ctx.createBufferSource();
+  fonte.buffer = ruido(ctx);
+  fonte.loop = true;
+  fonte.start(t);
+  fonte.stop(t + dur);
+  const f = filtro(ctx, tipo === 'subida' ? 'bandpass' : 'highpass', tipo === 'subida' ? 300 : 5000, tipo === 'subida' ? 2 : 0.7);
+  if (tipo === 'subida') f.frequency.exponentialRampToValueAtTime(9000, t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.exponentialRampToValueAtTime(tipo === 'subida' ? 0.6 : 0.7, t + dur * 0.98);
+  g.gain.linearRampToValueAtTime(0, t + dur);
+  fonte.connect(f).connect(g).connect(destino);
 }

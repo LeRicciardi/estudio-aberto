@@ -4,6 +4,7 @@ import { limparAudioSemUso, restaurarAudio } from './arquivo.ts';
 import { engine, estado } from './estado.ts';
 import { desenharTudo, quadro } from './transporte.ts';
 import './atalhos.ts';
+import { ligarMidi } from './midi.ts';
 import './paginas/projeto.ts';
 
 desenharTudo();
@@ -13,3 +14,4 @@ engine.mixer.sincronizar(estado.projeto);
 requestAnimationFrame(quadro);
 
 void restaurarAudio().then(limparAudioSemUso);
+void ligarMidi();

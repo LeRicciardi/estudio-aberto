@@ -1,14 +1,15 @@
 // Motor ao vivo: toca o projeto a partir de um ponto, e exporta a mix final.
 
 import {
-  LANES, STEPS, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, padraoNoCompasso, semitonsDoGrau,
-  type Padrao, type Project,
+  LANES, STEPS, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, localizarPasso, passosDoPadrao, semitonsDoGrau,
+  type Padrao, type PassoLocalizado, type Project, type Take,
 } from '../model/project.ts';
-import { presencaDaVoz, type TrechoDeVoz } from './espaco.ts';
+import { TAXA_DA_CURVA, presencaDaVoz, type TrechoDeVoz } from './espaco.ts';
+import { fimDasFrases } from './limpeza.ts';
 import { limitar } from './limiter.ts';
 import { medirLufs } from './loudness.ts';
 import { Mixer } from './mixer.ts';
-import { tocarBaixo, tocarBaixoSample, tocarNota, tocarTambor } from './synths.ts';
+import { tocarBaixo, tocarBaixoSample, tocarNota, tocarTambor, tocarVirada } from './synths.ts';
 import { RelogioDePassos, duracaoDoPasso, tempoDoPasso } from './tempo.ts';
 
 type Buffers = Map<string, AudioBuffer>;
@@ -32,31 +33,45 @@ function razaoDoSample(hz: number, notaDoSample: number): number {
   return razao;
 }
 
-/** Toca tudo que um padrão tem em um passo: bateria, 808 e melodia. */
-function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Buffers, padrao: Padrao | undefined, passo: number, quando: number) {
-  if (!padrao) return;
-  const s = passo % STEPS;
+/**
+ * Toca tudo que um padrão tem em um passo: bateria, 808 e melodia.
+ * `s` é o passo dentro do padrão; `trecho` traz os mudos e a virada do
+ * trecho do arranjo (ausente quando o padrão toca sozinho, em repetição).
+ */
+function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Buffers, padrao: Padrao, s: number, quando: number, trecho?: PassoLocalizado) {
   const dur = duracaoDoPasso(p.bpm);
-  for (const { id } of LANES) {
-    const v = padrao.bateria[id][s];
-    if (!v) continue;
-    // Rolo: o mesmo som repetido 2, 3 ou 4 vezes dentro de um único passo.
-    const toques = v >= 2 && v <= 4 ? v : 1;
-    const sample = buffers.get(p.samples[id]?.audioId ?? '');
-    for (let k = 0; k < toques; k++) {
-      const t = quando + (k * dur) / toques;
-      const volume = v === 5 ? 0.35 : k ? 0.8 : 1;
-      if (sample) tocarSample(ctx, mixer.barraBateria, sample, t, volume);
-      else tocarTambor(ctx, mixer.barraBateria, p.kit, id, t, volume);
+  const total = passosDoPadrao(padrao);
+  const mudos = trecho?.bloco.mudos ?? {};
+  const virada = trecho?.bloco.virada;
+  // Virada: um compasso antes do fim do trecho entra o efeito; no "silêncio",
+  // bateria e 808 param nas duas últimas batidas, e o trecho seguinte entra com impacto.
+  if (trecho && trecho.restam === STEPS && (virada === 'subida' || virada === 'crash')) tocarVirada(ctx, mixer.barraBateria, virada, quando, dur * STEPS);
+  const calado = !!trecho && virada === 'silencio' && trecho.restam <= STEPS / 2;
+
+  if (!mudos.bateria && !calado) {
+    for (const { id } of LANES) {
+      const v = padrao.bateria[id][s];
+      if (!v) continue;
+      // Rolo: o mesmo som repetido 2, 3 ou 4 vezes dentro de um único passo,
+      // cada toque um pouco mais forte que o anterior.
+      const toques = v >= 2 && v <= 4 ? v : 1;
+      const sample = buffers.get(p.samples[id]?.audioId ?? '');
+      for (let k = 0; k < toques; k++) {
+        const t = quando + (k * dur) / toques;
+        const volume = v === 5 ? 0.35 : toques > 1 ? 0.55 + (0.45 * k) / (toques - 1) : 1;
+        if (sample) tocarSample(ctx, mixer.barraBateria, sample, t, volume);
+        else tocarTambor(ctx, mixer.barraBateria, p.kit, id, t, volume);
+      }
+      if (id === 'kick' && p.beat.sidechain) mixer.abaixarBaixo(quando);
     }
   }
   const grau = padrao.baixo[s];
-  if (grau >= 0) {
+  if (grau >= 0 && !mudos.baixo && !calado) {
     let de: number | undefined;
     if (padrao.deslize[s]) {
-      // Procura a nota anterior do 808, dando a volta no compasso.
-      for (let k = 1; k < STEPS; k++) {
-        const anterior = padrao.baixo[(s - k + STEPS) % STEPS];
+      // Procura a nota anterior do 808, dando a volta no padrão.
+      for (let k = 1; k < total; k++) {
+        const anterior = padrao.baixo[(s - k + total) % total];
         if (anterior >= 0) {
           de = hzDoGrau(p, anterior, 'baixo');
           break;
@@ -71,9 +86,17 @@ function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Bu
       tocarBaixo(ctx, mixer.barraBaixo, p.kit, hzDoGrau(p, grau, 'baixo'), quando, de);
     }
   }
-  padrao.melodia.forEach((linha, g) => {
-    if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur);
-  });
+  if (!mudos.melodia) {
+    padrao.melodia.forEach((linha, g) => {
+      if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur);
+    });
+  }
+}
+
+/** Toca o passo `passo` da música (contado desde o início), conforme o arranjo. */
+function tocarPassoDaMusica(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Buffers, passo: number, quando: number) {
+  const local = localizarPasso(p, passo);
+  if (local) tocarPasso(ctx, mixer, p, buffers, local.padrao, local.s, quando, local);
 }
 
 /** Toca um sample do usuário (um som gravado) no lugar do som sintetizado. */
@@ -90,11 +113,14 @@ function tocarSample(ctx: BaseAudioContext, destino: AudioNode, sample: AudioBuf
 function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Buffers, t0: number, desde: number, partes: Partes = 'tudo') {
   const fontes: AudioBufferSourceNode[] = [];
   const tocar = (buf: AudioBuffer | undefined, destino: AudioNode | undefined, inicio: number) => {
-    if (!buf || !destino || inicio + buf.duration <= desde) return;
+    if (!buf || !destino || inicio + buf.duration / (p.beat.velocidade ?? 1) <= desde) return;
     const s = ctx.createBufferSource();
     s.buffer = buf;
     s.connect(destino);
-    s.start(t0 + Math.max(0, inicio - desde), Math.max(0, desde - inicio));
+    // Velocidade do beat importado: tocar mais rápido encurta e deixa mais agudo, como num toca-discos.
+    const v = p.beat.velocidade ?? 1;
+    s.playbackRate.value = v;
+    s.start(t0 + Math.max(0, inicio - desde), Math.max(0, desde - inicio) * v);
     fontes.push(s);
   };
   /** Agenda uma curva de volume feita de retas: `pontos` são [tempo da música, volume]. */
@@ -117,8 +143,13 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
    * Toca um take entre `de` e `ate` (tempos da música), respeitando a edição
    * dele: pedaços aparados, fades de entrada e saída e ganho.
    */
-  const tocarTake = (take: Project['takes'][number], de = -Infinity, ate = Infinity) => {
-    const buf = bufferDoTake(take, buffers);
+  const tocarTake = (take: Take, de = -Infinity, ate = Infinity) => {
+    tocarVoz(take, bufferDoTake(take, buffers), 1, de, ate);
+    // Harmonia: a segunda voz, gerada a partir do mesmo take, passa pelos mesmos efeitos.
+    const quanto = take.harmonia?.quanto ?? 0;
+    if (quanto > 0) tocarVoz(take, buffers.get(take.audioId + ':harm'), quanto, de, ate);
+  };
+  const tocarVoz = (take: Take, buf: AudioBuffer | undefined, nivel: number, de: number, ate: number) => {
     const destino = mixer.entradaDoTake(take.id);
     if (!buf || !destino) return;
     const ed = take.edicao;
@@ -132,7 +163,7 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
     // Entra e sai em pelo menos 8 ms, para nenhum corte estalar.
     const entra = Math.min(Math.max(ed.fadeIn, 0.008), (fim - comeco) / 2);
     const sai = Math.min(Math.max(ed.fadeOut, 0.008), (fim - comeco) / 2);
-    const ganho = 10 ** (ed.ganhoDb / 20);
+    const ganho = 10 ** (ed.ganhoDb / 20) * nivel;
     const doTake = curva([[comeco, 0], [comeco + entra, ganho], [fim - sai, ganho], [fim, 0]], a, b);
     // Cortes da montagem: mais uma rampa curta em cada ponta do trecho.
     const rampa = Math.min(0.008, (b - a) / 2);
@@ -161,7 +192,29 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
       i = j;
     }
   }
+  agendarEcos(mixer, p, buffers, t0, desde);
   return fontes;
+}
+
+/**
+ * "Eco só no fim da frase": a mandada de delay fica fechada e abre apenas no
+ * último pedaço de cada frase, para a palavra final ecoar no espaço seguinte.
+ */
+function agendarEcos(mixer: Mixer, p: Project, buffers: Buffers, t0: number, desde: number) {
+  const pontos = Math.ceil((duracaoDaMusica(p, buffers) + 2) * TAXA_DA_CURVA);
+  for (const take of p.takes) {
+    const buf = bufferDoTake(take, buffers);
+    if (!take.ecoNoFim || !buf) continue;
+    const curva = new Float32Array(pontos);
+    const forca = Math.max(take.delay, 0.45);
+    for (const fim of fimDasFrases(buf.getChannelData(0), buf.sampleRate)) {
+      const ate = Math.round((take.inicio + fim) * TAXA_DA_CURVA);
+      // Abre nos últimos 0,45 s da frase, com rampa de 0,1 s para não estalar.
+      for (let i = Math.max(0, ate - 45); i <= ate && i < pontos; i++) curva[i] = forca * Math.min(1, (i - (ate - 45)) / 10);
+      for (let i = ate + 1; i < ate + 8 && i < pontos; i++) curva[i] = forca * (1 - (i - ate) / 8);
+    }
+    mixer.agendarEco(take.id, curva, t0, desde);
+  }
 }
 
 /**
@@ -221,8 +274,9 @@ export class Engine {
     this.relogio = new RelogioDePassos(this.ctx, (passo, quando) => {
       const p = this.projeto;
       if (!p) return;
-      const padrao = this.padraoEmLoop === undefined ? padraoNoCompasso(p, Math.floor(passo / STEPS)) : p.padroes[this.padraoEmLoop];
-      tocarPasso(this.ctx, this.mixer, p, this.buffers, padrao, passo, quando);
+      const sozinho = this.padraoEmLoop === undefined ? undefined : p.padroes[this.padraoEmLoop];
+      if (sozinho) tocarPasso(this.ctx, this.mixer, p, this.buffers, sozinho, passo % passosDoPadrao(sozinho), quando);
+      else if (this.padraoEmLoop === undefined) tocarPassoDaMusica(this.ctx, this.mixer, p, this.buffers, passo, quando);
     });
   }
 
@@ -312,7 +366,7 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   mixer.agendarEspaco(presenca(p, buffers, partes), p, 0, 0);
   if (partes !== 'voz' && p.beat.fonte === 'padrao') {
     for (let i = 0; i < compassosDoArranjo(p) * STEPS; i++) {
-      tocarPasso(ctx, mixer, p, buffers, padraoNoCompasso(p, Math.floor(i / STEPS)), i, tempoDoPasso(i, p.bpm, p.swing));
+      tocarPassoDaMusica(ctx, mixer, p, buffers, i, tempoDoPasso(i, p.bpm, p.swing));
     }
   }
   const audio = await ctx.startRendering();
@@ -335,11 +389,16 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   return { audio, picoDb: 20 * Math.log10(pico || 1e-6), lufs: medirLufs(canais, taxa) };
 }
 
-/** Codifica um AudioBuffer como arquivo WAV PCM de 16 bits. */
-export function paraWav(audio: AudioBuffer): Blob {
+/**
+ * Codifica um AudioBuffer como arquivo WAV PCM. 16 bits é o padrão aceito
+ * por todas as distribuidoras; 24 bits guarda mais detalhe nos trechos
+ * baixos e é o que alguns engenheiros de masterização pedem.
+ */
+export function paraWav(audio: AudioBuffer, bits: 16 | 24 = 16): Blob {
   const canais = audio.numberOfChannels;
   const n = audio.length;
-  const bytes = n * canais * 2;
+  const porAmostra = bits / 8;
+  const bytes = n * canais * porAmostra;
   const v = new DataView(new ArrayBuffer(44 + bytes));
   const texto = (pos: number, s: string) => [...s].forEach((ch, i) => v.setUint8(pos + i, ch.charCodeAt(0)));
   texto(0, 'RIFF');
@@ -349,9 +408,9 @@ export function paraWav(audio: AudioBuffer): Blob {
   v.setUint16(20, 1, true);
   v.setUint16(22, canais, true);
   v.setUint32(24, audio.sampleRate, true);
-  v.setUint32(28, audio.sampleRate * canais * 2, true);
-  v.setUint16(32, canais * 2, true);
-  v.setUint16(34, 16, true);
+  v.setUint32(28, audio.sampleRate * canais * porAmostra, true);
+  v.setUint16(32, canais * porAmostra, true);
+  v.setUint16(34, bits, true);
   texto(36, 'data');
   v.setUint32(40, bytes, true);
   const dados = Array.from({ length: canais }, (_, c) => audio.getChannelData(c));
@@ -359,8 +418,15 @@ export function paraWav(audio: AudioBuffer): Blob {
   for (let i = 0; i < n; i++) {
     for (let c = 0; c < canais; c++) {
       const s = Math.max(-1, Math.min(1, dados[c][i]));
-      v.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-      pos += 2;
+      if (bits === 16) {
+        v.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      } else {
+        const inteiro = Math.round(s < 0 ? s * 0x800000 : s * 0x7fffff);
+        v.setUint8(pos, inteiro & 0xff);
+        v.setUint8(pos + 1, (inteiro >> 8) & 0xff);
+        v.setUint8(pos + 2, (inteiro >> 16) & 0xff);
+      }
+      pos += porAmostra;
     }
   }
   return new Blob([v], { type: 'audio/wav' });
@@ -371,13 +437,13 @@ export function paraWav(audio: AudioBuffer): Blob {
  * ouvir no celular. Para distribuidoras, use sempre o WAV. O codificador
  * (LAME em WebAssembly) só é carregado quando esta função é chamada.
  */
-export async function paraMp3(audio: AudioBuffer): Promise<Blob> {
+export async function paraMp3(audio: AudioBuffer, etiquetas?: Uint8Array): Promise<Blob> {
   const { createMp3Encoder } = await import('wasm-media-encoders');
   const codificador = await createMp3Encoder();
   codificador.configure({ sampleRate: audio.sampleRate, channels: 2, bitrate: 192 });
   const esq = audio.getChannelData(0);
   const dir = audio.numberOfChannels > 1 ? audio.getChannelData(1) : esq;
   // O codificador reaproveita a memória de saída: cada pedaço precisa ser copiado.
-  const partes = [codificador.encode([esq, dir]).slice(), codificador.finalize().slice()];
+  const partes = [...(etiquetas ? [etiquetas] : []), codificador.encode([esq, dir]).slice(), codificador.finalize().slice()];
   return new Blob(partes, { type: 'audio/mpeg' });
 }
