@@ -1,0 +1,22 @@
+{
+  "name": "estudio-aberto",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "publicar": "sh scripts/publicar.sh",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings src/engine/tune.test.ts && node --experimental-strip-types --no-warnings src/engine/limiter.test.ts && node --experimental-strip-types --no-warnings src/engine/medidas.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "wasm-media-encoders": "^0.7.0"
+  }
+}
