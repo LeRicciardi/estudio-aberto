@@ -38,7 +38,7 @@ function previa(): HTMLElement {
 
 export function desenharLetra() {
   const letra = estado.projeto.letra;
-  const texto = h('textarea', { className: 'letra', rows: 16, value: letra.texto, placeholder: 'Uma linha por compasso.\nDeixe uma linha em branco para um compasso de pausa.', spellcheck: true });
+  const texto = h('textarea', { className: 'letra', rows: 16, ariaLabel: 'Letra da música, uma linha por compasso', value: letra.texto, placeholder: 'Uma linha por compasso.\nDeixe uma linha em branco para um compasso de pausa.', spellcheck: true });
   const lista = h('div');
   const atualizar = () => lista.replaceChildren(previa());
   texto.oninput = () => {
