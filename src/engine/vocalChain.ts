@@ -136,9 +136,10 @@ function impulsoDeSala(ctx: BaseAudioContext, tamanho: TamanhoReverb): AudioBuff
 export interface CadeiaDeVoz {
   entrada: AudioNode;
   saida: AudioNode;
-  mandadaReverb: GainNode;
-  mandadaDelay: GainNode;
-  realimentacao: GainNode;
+  /** O compressor, exposto para a tela mostrar quanto ele está reduzindo. */
+  compressor: DynamicsCompressorNode;
+  /** Aplica ao vivo os ajustes do take que não exigem remontar a cadeia. */
+  ajustar(take: Take): void;
   desligar(): void;
 }
 
@@ -146,12 +147,26 @@ export interface CadeiaDeVoz {
 export const chaveDaCadeia = (take: Take, bpm: number) =>
   [take.preset, take.divisaoDelay, bpm, take.tamanhoReverb, take.telefone, Math.round(take.distorcao * 20)].join('|');
 
-export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number): CadeiaDeVoz {
-  const { preset, divisaoDelay: divisao } = take;
+/** Copia para o take os valores de equalizador, compressor, reverb e delay do timbre escolhido. */
+export function aplicarTimbre(take: Take, preset: PresetVoz) {
   const r = PRESETS_VOZ[preset];
+  take.preset = preset;
+  take.eq = { corte: r.corteGrave, graveDb: 0, medioHz: r.presenca[0], medioDb: r.presenca[1], arDb: r.ar };
+  take.comp = { limiar: r.comp[0], razao: r.comp[1], ataque: 5, soltura: 120, ganho: 0 };
+  take.reverb = r.reverb;
+  take.delay = r.delay;
+}
+
+/**
+ * Monta o caminho da voz, nesta ordem:
+ * (telefone) → equalizador → compressor → (saturação) → dobra estéreo →
+ * saída direta + mandada de reverb + mandada de delay.
+ */
+export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number): CadeiaDeVoz {
+  const r = PRESETS_VOZ[take.preset];
   const entrada = ctx.createGain();
   const saida = ctx.createGain();
-  const nos: AudioNode[] = [entrada];
+  const nos: AudioNode[] = [entrada, saida];
   let fim: AudioNode = entrada;
   const ligar = <T extends AudioNode>(no: T): T => {
     fim.connect(no);
@@ -159,7 +174,12 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
     fim = no;
     return no;
   };
-
+  const filtro = (tipo: BiquadFilterType, hz: number) => {
+    const f = ligar(ctx.createBiquadFilter());
+    f.type = tipo;
+    f.frequency.value = hz;
+    return f;
+  };
   // Saturar aumenta muito o volume; o ganho depois devolve ao nível de antes,
   // para a distorção mudar o timbre e não a altura do som.
   const saturar = (forca: number) => {
@@ -169,41 +189,44 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
 
   if (take.telefone) {
     // Telefone antigo só transmitia os médios: sem grave e sem agudo.
-    const semGrave = ligar(ctx.createBiquadFilter());
-    semGrave.type = 'highpass';
-    semGrave.frequency.value = 450;
-    const semAgudo = ligar(ctx.createBiquadFilter());
-    semAgudo.type = 'lowpass';
-    semAgudo.frequency.value = 2800;
+    filtro('highpass', 450);
+    filtro('lowpass', 2800);
   }
 
-  if (preset !== 'cru') {
-    const hp = ligar(ctx.createBiquadFilter());
-    hp.type = 'highpass';
-    hp.frequency.value = r.corteGrave;
+  // Equalizador de quatro bandas.
+  const corte = filtro('highpass', 20);
+  const grave = filtro('lowshelf', 200);
+  const medio = filtro('peaking', 3000);
+  const ar = filtro('highshelf', 9000);
 
-    const pres = ligar(ctx.createBiquadFilter());
-    pres.type = 'peaking';
-    pres.frequency.value = r.presenca[0];
-    pres.gain.value = r.presenca[1];
+  const compressor = ligar(ctx.createDynamicsCompressor());
+  const compensa = ligar(ctx.createGain());
 
-    const ar = ligar(ctx.createBiquadFilter());
-    ar.type = 'highshelf';
-    ar.frequency.value = 9000;
-    ar.gain.value = r.ar;
-
-    const comp = ligar(ctx.createDynamicsCompressor());
-    comp.threshold.value = r.comp[0];
-    comp.ratio.value = r.comp[1];
-    comp.attack.value = 0.005;
-    comp.release.value = 0.12;
-
-    if (r.forca > 0) saturar(r.forca);
-  }
+  if (r.forca > 0) saturar(r.forca);
   if (take.distorcao > 0) saturar(1 + take.distorcao * 11);
 
   // Sinal direto.
   fim.connect(saida);
+
+  // Dobra: duas cópias atrasadas alguns milissegundos, uma em cada lado. Um
+  // oscilador lento varia o atraso, para as cópias soarem como outras tomadas.
+  const dobra = ctx.createGain();
+  fim.connect(dobra);
+  const balanco = ctx.createOscillator();
+  balanco.frequency.value = 0.35;
+  balanco.start();
+  nos.push(dobra, balanco);
+  for (const [atraso, lado] of [[0.017, -0.85], [0.026, 0.85]]) {
+    const linha = ctx.createDelay(0.1);
+    linha.delayTime.value = atraso;
+    const variacao = ctx.createGain();
+    variacao.gain.value = 0.0015 * Math.sign(lado);
+    balanco.connect(variacao).connect(linha.delayTime);
+    const posicao = ctx.createStereoPanner();
+    posicao.pan.value = lado;
+    dobra.connect(linha).connect(posicao).connect(saida);
+    nos.push(linha, variacao, posicao);
+  }
 
   // Reverb: uma cópia da voz passa pela "sala" e volta somada.
   const mandadaReverb = ctx.createGain();
@@ -214,15 +237,60 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
   // Delay: uma cópia atrasada, realimentada para repetir e ir sumindo.
   const mandadaDelay = ctx.createGain();
   const atraso = ctx.createDelay(2);
-  atraso.delayTime.value = Math.min(2, (60 / bpm) * (4 / divisao));
+  atraso.delayTime.value = Math.min(2, (60 / bpm) * (4 / take.divisaoDelay));
   const realimentacao = ctx.createGain();
-  realimentacao.gain.value = 0.35;
   const abafar = ctx.createBiquadFilter();
   abafar.type = 'lowpass';
   abafar.frequency.value = 3500;
   fim.connect(mandadaDelay).connect(atraso).connect(abafar).connect(saida);
   abafar.connect(realimentacao).connect(atraso);
+  nos.push(mandadaReverb, sala, mandadaDelay, atraso, realimentacao, abafar);
 
-  nos.push(saida, mandadaReverb, sala, mandadaDelay, atraso, realimentacao, abafar);
-  return { entrada, saida, mandadaReverb, mandadaDelay, realimentacao, desligar: () => nos.forEach((n) => n.disconnect()) };
+  const ajustar = (t: Take) => {
+    corte.frequency.value = Math.max(20, t.eq.corte);
+    grave.gain.value = t.eq.graveDb;
+    medio.frequency.value = t.eq.medioHz;
+    medio.gain.value = t.eq.medioDb;
+    ar.gain.value = t.eq.arDb;
+    compressor.threshold.value = t.comp.limiar;
+    compressor.ratio.value = t.comp.razao;
+    compressor.attack.value = t.comp.ataque / 1000;
+    compressor.release.value = t.comp.soltura / 1000;
+    compensa.gain.value = 10 ** (t.comp.ganho / 20);
+    dobra.gain.value = t.dobra * 0.6;
+    mandadaReverb.gain.value = t.reverb;
+    mandadaDelay.gain.value = t.delay;
+    realimentacao.gain.value = t.repeticoes;
+  };
+  ajustar(take);
+
+  return {
+    entrada, saida, compressor, ajustar,
+    desligar: () => {
+      balanco.stop();
+      nos.forEach((n) => n.disconnect());
+    },
+  };
+}
+
+/** Resposta do equalizador de um take em cada frequência pedida, em dB. Serve para desenhar a curva. */
+export function curvaDoEq(ctx: BaseAudioContext, take: Take, frequencias: Float32Array): Float32Array {
+  const total = new Float32Array(frequencias.length);
+  const modulo = new Float32Array(frequencias.length);
+  const fase = new Float32Array(frequencias.length);
+  const bandas: [BiquadFilterType, number, number][] = [
+    ['highpass', Math.max(20, take.eq.corte), 0],
+    ['lowshelf', 200, take.eq.graveDb],
+    ['peaking', take.eq.medioHz, take.eq.medioDb],
+    ['highshelf', 9000, take.eq.arDb],
+  ];
+  for (const [tipo, hz, ganho] of bandas) {
+    const f = ctx.createBiquadFilter();
+    f.type = tipo;
+    f.frequency.value = hz;
+    f.gain.value = ganho;
+    f.getFrequencyResponse(frequencias, modulo, fase);
+    for (let i = 0; i < total.length; i++) total[i] += 20 * Math.log10(modulo[i] || 1e-6);
+  }
+  return total;
 }

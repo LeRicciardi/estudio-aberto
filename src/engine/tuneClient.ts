@@ -1,7 +1,7 @@
 // Manda trabalhos ao worker e devolve o resultado como Promise.
 
 import type { detectarBpm, detectarTom } from './analise.ts';
-import type { OpcoesTune } from './tune.ts';
+import type { Processamento } from './tune.worker.ts';
 
 let worker: Worker | undefined;
 let proximoId = 0;
@@ -24,8 +24,8 @@ function pedir<T>(pedido: Record<string, unknown>, amostras: Float32Array): Prom
   });
 }
 
-export const afinarEmSegundoPlano = (amostras: Float32Array, taxa: number, opcoes: OpcoesTune) =>
-  pedir<Float32Array>({ tipo: 'afinar', taxa, opcoes }, amostras);
+export const processarEmSegundoPlano = (amostras: Float32Array, taxa: number, opcoes: Processamento) =>
+  pedir<Float32Array>({ tipo: 'processar', taxa, opcoes }, amostras);
 
 export interface AnaliseDoBeat {
   bpm: ReturnType<typeof detectarBpm>;

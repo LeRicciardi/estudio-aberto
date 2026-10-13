@@ -88,38 +88,65 @@ function tocarSample(ctx: BaseAudioContext, destino: AudioNode, sample: AudioBuf
 /** Agenda o beat importado e os takes de voz para tocarem a partir de `desde`. */
 function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Buffers, t0: number, desde: number, partes: Partes = 'tudo') {
   const fontes: AudioBufferSourceNode[] = [];
-  /** Toca a parte do áudio que cai entre `de` e `ate` (tempos da música). */
-  const tocar = (buf: AudioBuffer | undefined, destino: AudioNode | undefined, inicio: number, de = -Infinity, ate = Infinity) => {
-    if (!buf || !destino) return;
-    const a = Math.max(inicio, de, desde);
-    const b = Math.min(inicio + buf.duration, ate);
-    if (b <= a) return;
+  const tocar = (buf: AudioBuffer | undefined, destino: AudioNode | undefined, inicio: number) => {
+    if (!buf || !destino || inicio + buf.duration <= desde) return;
     const s = ctx.createBufferSource();
     s.buffer = buf;
-    const quando = t0 + a - desde;
-    if (Number.isFinite(ate)) {
-      // Trecho recortado: entra e sai em 8 ms, para o corte não estalar.
-      const g = ctx.createGain();
-      const rampa = Math.min(0.008, (b - a) / 2);
-      g.gain.setValueAtTime(0, quando);
-      g.gain.linearRampToValueAtTime(1, quando + rampa);
-      g.gain.setValueAtTime(1, quando + (b - a) - rampa);
-      g.gain.linearRampToValueAtTime(0, quando + (b - a));
-      s.connect(g).connect(destino);
-    } else {
-      s.connect(destino);
-    }
-    s.start(quando, a - inicio, b - a);
+    s.connect(destino);
+    s.start(t0 + Math.max(0, inicio - desde), Math.max(0, desde - inicio));
     fontes.push(s);
   };
+  /** Agenda uma curva de volume feita de retas: `pontos` são [tempo da música, volume]. */
+  const curva = (pontos: [number, number][], a: number, b: number): GainNode => {
+    const g = ctx.createGain();
+    const valorEm = (t: number) => {
+      for (let k = 1; k < pontos.length; k++) {
+        const [t1, v1] = pontos[k - 1];
+        const [t2, v2] = pontos[k];
+        if (t <= t2) return t2 > t1 ? v1 + ((v2 - v1) * Math.max(0, t - t1)) / (t2 - t1) : v2;
+      }
+      return pontos[pontos.length - 1][1];
+    };
+    g.gain.setValueAtTime(valorEm(a), t0 + a - desde);
+    for (const [t, v] of pontos) if (t > a && t < b) g.gain.linearRampToValueAtTime(v, t0 + t - desde);
+    g.gain.linearRampToValueAtTime(valorEm(b), t0 + b - desde);
+    return g;
+  };
+  /**
+   * Toca um take entre `de` e `ate` (tempos da música), respeitando a edição
+   * dele: pedaços aparados, fades de entrada e saída e ganho.
+   */
+  const tocarTake = (take: Project['takes'][number], de = -Infinity, ate = Infinity) => {
+    const buf = bufferDoTake(take, buffers);
+    const destino = mixer.entradaDoTake(take.id);
+    if (!buf || !destino) return;
+    const ed = take.edicao;
+    const comeco = take.inicio + ed.ini;
+    const fim = take.inicio + buf.duration - ed.fim;
+    const a = Math.max(comeco, de, desde);
+    const b = Math.min(fim, ate);
+    if (b - a < 0.005) return;
+    const s = ctx.createBufferSource();
+    s.buffer = buf;
+    // Entra e sai em pelo menos 8 ms, para nenhum corte estalar.
+    const entra = Math.min(Math.max(ed.fadeIn, 0.008), (fim - comeco) / 2);
+    const sai = Math.min(Math.max(ed.fadeOut, 0.008), (fim - comeco) / 2);
+    const ganho = 10 ** (ed.ganhoDb / 20);
+    const doTake = curva([[comeco, 0], [comeco + entra, ganho], [fim - sai, ganho], [fim, 0]], a, b);
+    // Cortes da montagem: mais uma rampa curta em cada ponta do trecho.
+    const rampa = Math.min(0.008, (b - a) / 2);
+    const doTrecho = curva([[a, Number.isFinite(de) ? 0 : 1], [a + rampa, 1], [b - rampa, 1], [b, Number.isFinite(ate) ? 0 : 1]], a, b);
+    s.connect(doTake).connect(doTrecho).connect(destino);
+    s.start(t0 + a - desde, a - take.inicio, b - a);
+    fontes.push(s);
+  };
+
   if (partes !== 'voz' && p.beat.fonte === 'arquivo' && p.beat.audioId) tocar(buffers.get(p.beat.audioId), mixer.barraDoBeat, 0);
   if (partes === 'beat') return fontes;
   const trecho = duracaoDoTrecho(p);
   for (const take of p.takes) {
-    const buf = bufferDoTake(take, buffers);
-    const destino = mixer.entradaDoTake(take.id);
     if (!p.montagem.ligada || !take.naMontagem) {
-      tocar(buf, destino, take.inicio);
+      tocarTake(take);
       continue;
     }
     // Montagem: o take só toca nos trechos em que foi escolhido. Trechos
@@ -129,7 +156,7 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
       if (escolha[i] !== take.id) continue;
       let j = i;
       while (escolha[j + 1] === take.id) j++;
-      tocar(buf, destino, take.inicio, i * trecho, (j + 1) * trecho);
+      tocarTake(take, i * trecho, (j + 1) * trecho);
       i = j;
     }
   }
@@ -149,8 +176,6 @@ export class Engine {
   /** Ponto da música (s) de onde a reprodução começou. */
   desde = 0;
 
-  private analisador = this.ctx.createAnalyser();
-  private amostras = new Float32Array(2048);
   private fontes: AudioBufferSourceNode[] = [];
   private relogio: RelogioDePassos;
   private projeto: Project | undefined;
@@ -158,8 +183,6 @@ export class Engine {
   private padraoEmLoop: number | undefined;
 
   constructor() {
-    this.analisador.fftSize = 2048;
-    this.mixer.saida.connect(this.analisador);
     this.relogio = new RelogioDePassos(this.ctx, (passo, quando) => {
       const p = this.projeto;
       if (!p) return;
@@ -225,10 +248,7 @@ export class Engine {
 
   /** Pico atual da saída em dBFS (0 = máximo antes de distorcer). */
   picoDb(): number {
-    this.analisador.getFloatTimeDomainData(this.amostras);
-    let pico = 0;
-    for (const v of this.amostras) pico = Math.max(pico, Math.abs(v));
-    return 20 * Math.log10(pico || 1e-6);
+    return this.mixer.picoDb('master');
   }
 }
 
@@ -259,6 +279,17 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   }
   const audio = await ctx.startRendering();
   const canais = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c));
+  // Volume-alvo: mede o volume percebido da música inteira e sobe ou desce
+  // tudo para chegar ao alvo (o Spotify, por exemplo, trabalha em -14 LUFS).
+  // O limitador vem depois e segura os picos que esse ganho criar.
+  const alvo = p.ajusteDoMaster.alvoLufs;
+  if (alvo !== null && partes === 'tudo') {
+    const atual = medirLufs(canais, taxa);
+    if (Number.isFinite(atual)) {
+      const ganho = 10 ** (Math.max(-12, Math.min(12, alvo - atual)) / 20);
+      for (const canal of canais) for (let i = 0; i < canal.length; i++) canal[i] *= ganho;
+    }
+  }
   limitar(canais, taxa, -1);
 
   let pico = 0;

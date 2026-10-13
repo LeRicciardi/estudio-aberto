@@ -169,6 +169,7 @@ export function novoProjeto(genero = 'trap'): Project {
     voz: { preset: 'rap', tune: false, velocidade: 0.2 },
     latenciaMs: null,
     master: 'limpo',
+    ajusteDoMaster: { graveDb: 0, medioDb: 0, agudoDb: 0, largura: 1, alvoLufs: -14 },
   };
   aplicarGenero(p, genero);
   return p;

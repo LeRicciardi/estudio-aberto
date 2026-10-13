@@ -21,7 +21,7 @@ Abra o endereço que aparecer (por padrão `http://localhost:5173`). Use fone de
 npm test
 ```
 
-Roda os testes do motor sem navegador: tune, limitador, medidor LUFS, medição de atraso e análise de BPM e tom.
+Roda os testes do motor sem navegador: tune, limitador, medidor LUFS, medição de atraso, análise de BPM e tom, gate e de-esser.
 
 ```bash
 npm run publicar
@@ -31,21 +31,23 @@ Gera o build e publica no GitHub Pages (ramo `gh-pages`).
 
 ## O que já existe
 
-| Etapa | Recurso |
+A tela é organizada como uma estação de trabalho: barra de transporte no topo (tocar, gravar, visor de tempo, BPM e tom, medidor) e uma página para cada parte do trabalho.
+
+| Página | O que faz |
 |---|---|
-| Estilo | Modelos para boombap, trap, plug, love song, drill, hard/trash, funk, mandelão e bruxaria: andamento, balanço, kit, timbre de voz e padrão de partida |
-| Beat | Bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 14 samples prontos (bumbo, caixa, palma, chimbais, estalo) ou samples próprios; 808 em grade de notas com deslize, sintetizado ou por sample próprio afinado; melodia com 5 instrumentos; padrões e arranjo; ou importação de um beat pronto |
-| Voz | Gravação em PCM sem compressão, vários takes, medição do atraso do aparelho, montagem por trechos (comping) |
-| Tune | Correção de afinação para o tom e a escala da música: velocidade (robótico a natural), intensidade e altura da voz (±12 semitons) |
-| Mix | Por take: volume, lado, 9 timbres por gênero, reverb (3 tamanhos), delay no tempo do beat com repetições, distorção, voz de telefone; espaço no beat para a voz |
-| Master | Compressor de cola, ganho, limitador de pico real e medidor LUFS |
-| Exportação | WAV (16 bits, 44,1 kHz), MP3, só vozes, só beat |
-| Projeto | Salvamento automático no navegador, desfazer/refazer, arquivo único com projeto e áudio |
-| Tela simples | Uma etapa por vez (Estilo, Beat, Gravar, Voz, Exportar), estilos em cartões com prévia, controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco) |
-| Ajuda automática | Sugestão de BPM e tom do beat importado, aviso de voz estourada ou baixa, conferência do equilíbrio entre voz e beat, comparação com e sem efeitos |
-| Gravação | Contagem de 4, medidor do microfone, escolha do microfone, regravar um trecho, forma de onda de cada take |
-| Computador | Atalhos de teclado, pintar a grade arrastando o mouse, arrastar arquivos para a janela, duas colunas em telas largas |
-| Aplicativo | Instalável no celular e no computador (PWA), abre sem internet |
+| Estilo | Cartões de gênero com prévia: boombap, trap, plug, love song, drill, hard/trash, funk, mandelão, bruxaria. Cada um traz andamento, balanço, kit, timbre de voz e padrão de partida |
+| Beat | Grade de bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 14 samples prontos ou samples próprios; ou importação de um beat pronto, com sugestão de BPM e tom |
+| Notas | 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com 5 instrumentos, tudo preso à escala da música |
+| Arranjo | Linha do tempo com os padrões em sequência e a forma de onda de cada voz; ordem dos padrões |
+| Gravar | Gravação em PCM sem compressão, contagem de 4, medidor e escolha do microfone, regravar um trecho, medição do atraso do aparelho, aviso de voz estourada ou baixa |
+| Voz | Uma tela por ferramenta, com botões giratórios: afinação (tune), equalizador com curva, compressor com medidor de redução, espaço (reverb, delay, dobra estéreo), caráter (timbre, distorção, telefone), limpeza (gate e de-esser) e edição (aparar, fades, ganho). Montagem do melhor de cada take, comparação com e sem efeitos e conferência do equilíbrio com o beat |
+| Mixer | Uma faixa por canal (bateria, 808, melodia, beat, cada voz, master) com medidor, volume, lado e mudo |
+| Master | Acabamento (compressor de cola, ganho, limitador), equalizador de 3 bandas, largura do estéreo, volume final em LUFS; exportação em WAV, MP3, só vozes ou só beat |
+| Projeto | Salvamento automático, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
+
+A **tela simples** mostra só Estilo, Beat, Gravar, Voz, Master e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
+
+No computador há atalhos de teclado, pintura da grade com o mouse e arrastar arquivos para a janela. Desfazer e refazer valem para tudo.
 
 ## Como o código está organizado
 
@@ -57,9 +59,10 @@ src/
   engine/
     tempo.ts            Passos, swing e o relógio do sequenciador
     synths.ts           Síntese: kits de bateria, 808, instrumentos
-    vocalChain.ts       Cadeia de voz: filtros, compressor, saturação, reverb, delay
+    vocalChain.ts       Cadeia de voz: equalizador, compressor, saturação, dobra, reverb, delay
+    limpeza.ts          Gate e de-esser
     tune.ts             Tune: detecção de pitch (YIN) e correção (TD-PSOLA)
-    tune.worker.ts      Roda o tune fora da thread da tela
+    tune.worker.ts      Limpeza, tune e análise fora da thread da tela
     mixer.ts            Mesa de mixagem e cadeia de master
     limiter.ts          Limitador de pico com antecipação
     loudness.ts         Medidor LUFS (ITU-R BS.1770)
@@ -68,7 +71,11 @@ src/
     recorder.ts         Captura do microfone
     engine.ts           Reprodução ao vivo e exportação
   storage.ts            Salvamento local e arquivo de projeto
-  main.ts               Interface
+  ui/
+    controles.ts        Campos, botões e o botão giratório
+    efeitos.ts          Telas de efeito de um take
+    mixer.ts            Página do mixer
+  main.ts               Páginas, transporte e ligação entre interface e motor
 public/captura.worklet.js   Captura de áudio na thread de áudio
 public/sw.js                Guarda o aplicativo no aparelho para abrir sem internet
 public/manifest.webmanifest Dados de instalação (nome, ícones)
@@ -96,7 +103,7 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 | Ctrl/⌘ + E | Exportar música (WAV) |
 | ← → | Voltar / avançar 5 segundos |
 | Home | Voltar ao início |
-| 1 a 5 | Ir para a etapa (tela simples) |
+| 1 a 9 | Ir para a página |
 
 ## Limites atuais
 
@@ -108,7 +115,9 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 - Os samples prontos de caixa, palma e chimbal são de bateria acústica, não de bateria eletrônica. Não há sample pronto de 808 (nenhum com licença de domínio público verificável); o 808 aceita sample do usuário. A melodia ainda não aceita samples.
 - A altura da voz preserva o timbre (formantes): não faz o efeito de voz "de esquilo".
 - Cada padrão tem um compasso; frases mais longas são feitas alternando padrões no arranjo.
-- Ao vivo, o limitador é aproximado por um compressor; o limitador de pico real só entra na exportação.
+- Ao vivo, o limitador é aproximado por um compressor; o limitador de pico real e o ajuste de volume final só entram na exportação. Com alvos altos (-11 LUFS), o limitador pode segurar a música um pouco abaixo do alvo.
+- O visual segue a organização comum das estações de trabalho de áudio (transporte, grade de canais, grade de notas, arranjo, mixer). Não usa imagens, ícones nem código de nenhum outro programa.
+- `main.ts` concentra as páginas e está grande; dividi-lo em um arquivo por página é a próxima limpeza.
 - A montagem de takes corta em limites de compasso (1, 2 ou 4); não há corte livre dentro do take.
 - Não há colaboração em nuvem; a troca é pelo arquivo de projeto.
 - Não foi testado em iPhone nem em Android de entrada. Os riscos conhecidos estão em `docs/pesquisa.md`.

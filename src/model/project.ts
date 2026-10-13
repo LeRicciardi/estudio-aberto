@@ -85,6 +85,27 @@ export interface Take {
   telefone: boolean;
   /** Se o take participa da montagem (comping) ou toca sempre inteiro. */
   naMontagem: boolean;
+  /** Equalizador: o timbre escolhido preenche estes valores, e eles podem ser mexidos depois. */
+  eq: { corte: number; graveDb: number; medioHz: number; medioDb: number; arDb: number };
+  /** Compressor: limiar e ganho em dB, ataque e soltura em milissegundos. */
+  comp: { limiar: number; razao: number; ataque: number; soltura: number; ganho: number };
+  /** Dobra estéreo: cópias levemente atrasadas da voz, uma de cada lado (0 a 1). */
+  dobra: number;
+  /** Limpeza: `gate` é o limiar em dB abaixo do qual o som é abafado (0 = desligado); `deEsser` vai de 0 a 1. */
+  limpeza: { gate: number; deEsser: number };
+  /** Edição: segundos aparados do começo e do fim, fades e ganho da gravação em dB. */
+  edicao: { ini: number; fim: number; fadeIn: number; fadeOut: number; ganhoDb: number };
+}
+
+/** Ajustes do master além do acabamento escolhido. */
+export interface AjusteDoMaster {
+  graveDb: number;
+  medioDb: number;
+  agudoDb: number;
+  /** Largura do estéreo: 0 = mono, 1 = como está, 2 = bem aberto. */
+  largura: number;
+  /** Volume-alvo da exportação em LUFS; null = não ajustar. */
+  alvoLufs: number | null;
 }
 
 export interface Project {
@@ -124,6 +145,7 @@ export interface Project {
   /** Atraso do sistema em ms; null = estimar automaticamente. */
   latenciaMs: number | null;
   master: PresetMaster;
+  ajusteDoMaster: AjusteDoMaster;
 }
 
 export function padraoVazio(nome: string): Padrao {
@@ -147,6 +169,11 @@ export function novoTake(id: string, nome: string, audioId: string, inicio: numb
     reverb: 0.1, tamanhoReverb: 'sala', delay: 0, divisaoDelay: 8, repeticoes: 0.35,
     distorcao: 0, telefone: false,
     naMontagem: false,
+    eq: { corte: 90, graveDb: 0, medioHz: 3500, medioDb: 0, arDb: 0 },
+    comp: { limiar: -20, razao: 3, ataque: 5, soltura: 120, ganho: 0 },
+    dobra: 0,
+    limpeza: { gate: 0, deEsser: 0 },
+    edicao: { ini: 0, fim: 0, fadeIn: 0, fadeOut: 0, ganhoDb: 0 },
   };
 }
 
@@ -187,6 +214,7 @@ export const PREFIXO_DE_FABRICA = 'fabrica:';
 export function normalizar(p: Project): Project {
   p.samples ??= {};
   p.montagem ??= { ligada: false, compassos: 2, escolha: [] };
+  p.ajusteDoMaster ??= { graveDb: 0, medioDb: 0, agudoDb: 0, largura: 1, alvoLufs: null };
   for (const t of p.takes) {
     t.naMontagem ??= false;
     t.tune.intensidade ??= 1;
@@ -195,6 +223,11 @@ export function normalizar(p: Project): Project {
     t.repeticoes ??= 0.35;
     t.distorcao ??= 0;
     t.telefone ??= false;
+    t.eq ??= { corte: 90, graveDb: 0, medioHz: 3500, medioDb: 2, arDb: 2 };
+    t.comp ??= { limiar: -22, razao: 4, ataque: 5, soltura: 120, ganho: 0 };
+    t.dobra ??= 0;
+    t.limpeza ??= { gate: 0, deEsser: 0 };
+    t.edicao ??= { ini: 0, fim: 0, fadeIn: 0, fadeOut: 0, ganhoDb: 0 };
   }
   return p;
 }
@@ -223,9 +256,12 @@ export function padraoNoCompasso(p: Project, compasso: number): Padrao | undefin
 /** O take passa pelo processador de afinação se o tune está ligado ou a altura foi mudada. */
 export const usaTune = (take: Take) => take.tune.ligado || take.altura !== 0;
 
+/** O take precisa de processamento prévio (fora do tempo real): afinação ou limpeza. */
+export const usaProcessamento = (take: Take) => usaTune(take) || take.limpeza.gate < 0 || take.limpeza.deEsser > 0;
+
 /** Qual buffer tocar para um take: a versão afinada, se existir, ou a original. */
 export function bufferDoTake(take: Take, buffers: Map<string, AudioBuffer>): AudioBuffer | undefined {
-  return (usaTune(take) && buffers.get(take.audioId + ':tune')) || buffers.get(take.audioId);
+  return (usaProcessamento(take) && buffers.get(take.audioId + ':tune')) || buffers.get(take.audioId);
 }
 
 export function duracaoDaMusica(p: Project, buffers: Map<string, AudioBuffer>): number {

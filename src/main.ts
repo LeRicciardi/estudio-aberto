@@ -7,17 +7,20 @@ import { avisoDeNivel } from './engine/analise.ts';
 import { Gravador, listarMicrofones, medirLatencia } from './engine/recorder.ts';
 import { INSTRUMENTOS, KITS } from './engine/synths.ts';
 import { duracaoDoPasso } from './engine/tempo.ts';
-import { afinarEmSegundoPlano, analisarEmSegundoPlano, type AnaliseDoBeat } from './engine/tuneClient.ts';
-import { PRESETS_VOZ, TAMANHOS_DE_REVERB } from './engine/vocalChain.ts';
+import { analisarEmSegundoPlano, processarEmSegundoPlano, type AnaliseDoBeat } from './engine/tuneClient.ts';
+import { PRESETS_VOZ, aplicarTimbre } from './engine/vocalChain.ts';
 import { GENEROS, aplicarGenero, novoProjeto } from './model/generos.ts';
 import {
   LANES, LINHAS, NOTAS, PREFIXO_DE_FABRICA, SAMPLES_DE_FABRICA, STEPS, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, idsDeAudio, nomeDoGrau, novoTake, padraoNoCompasso,
-  padraoVazio, usaTune,
-  type DivisaoDelay, type Escala, type InstrumentoId, type KitId, type LaneId, type PresetMaster, type PresetVoz, type Project, type Take, type TamanhoReverb,
+  padraoVazio, usaProcessamento, usaTune,
+  type Escala, type InstrumentoId, type KitId, type LaneId, type PresetMaster, type PresetVoz, type Project, type Take,
 } from './model/project.ts';
 import {
   apagarAudio, carregarProjeto, desempacotarProjeto, empacotarProjeto, guardarAudio, lerAudio, listarAudios, salvarProjeto,
 } from './storage.ts';
+import { baixar, botao, campo, deslizante, explicacao, giratorio, h, ligarMudanca, numero, opcoes, seletor } from './ui/controles.ts';
+import { TELAS, telaDeEfeito, type Tela } from './ui/efeitos.ts';
+import { mesa } from './ui/mixer.ts';
 
 const engine = new Engine();
 const gravador = new Gravador(engine.ctx);
@@ -53,24 +56,19 @@ function projetoParaTocar(): Project {
   return {
     ...projeto,
     takes: projeto.takes.map((t) => ({
-      ...t, preset: 'cru', reverb: 0, delay: 0, distorcao: 0, telefone: false, altura: 0, tune: { ...t.tune, ligado: false },
+      ...t, preset: 'cru', reverb: 0, delay: 0, distorcao: 0, telefone: false, altura: 0, dobra: 0,
+      tune: { ...t.tune, ligado: false },
+      limpeza: { gate: 0, deEsser: 0 },
+      eq: { corte: 20, graveDb: 0, medioHz: 3000, medioDb: 0, arDb: 0 },
+      comp: { limiar: 0, razao: 1, ataque: 5, soltura: 120, ganho: 0 },
     })),
   };
 }
 
 // ---------- utilidades de interface ----------
 
-type Filho = Node | string;
-
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...filhos: Filho[]): HTMLElementTagNameMap[K] {
-  const el = Object.assign(document.createElement(tag), props);
-  el.append(...filhos);
-  return el;
-}
-
 const id = () => Math.random().toString(36).slice(2, 10);
 const relogio = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const opcoes = <T extends string>(mapa: Record<T, unknown>, nome: (k: T) => string) => (Object.keys(mapa) as T[]).map((k) => [k, nome(k)] as [T, string]);
 
 // ---------- histórico (desfazer / refazer) ----------
 // Cada estado do projeto é guardado como texto JSON. Desfazer é voltar ao
@@ -102,6 +100,8 @@ function mudou(agrupar = false) {
 }
 
 /** `passos` = -1 desfaz, +1 refaz. */
+ligarMudanca(mudou);
+
 function navegarHistorico(passos: number) {
   registrar();
   const novoIndice = indice + passos;
@@ -141,123 +141,90 @@ function trocarTela() {
   localStorage.setItem(CHAVE_DO_MODO, telaSimples ? 'simples' : 'completa');
   document.body.classList.toggle('simples', telaSimples);
   if (engine.tocando && !gravando) parar();
-  desenharTransporte();
-  desenharTrilha();
-}
-
-// ---------- controles reutilizáveis ----------
-
-function campo(rotulo: string, controle: HTMLElement): HTMLLabelElement {
-  return h('label', { className: 'campo' }, h('span', {}, rotulo), controle);
-}
-
-function deslizante(rotulo: string, min: number, max: number, passo: number, valor: number, aoMudar: (v: number) => void, aoSoltar?: () => void) {
-  const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(passo), value: String(valor) });
-  input.oninput = () => {
-    aoMudar(Number(input.value));
-    mudou(true);
-  };
-  if (aoSoltar) input.onchange = aoSoltar;
-  return campo(rotulo, input);
-}
-
-function numero(rotulo: string, min: number, max: number, valor: number, aoMudar: (v: number) => void, passo = 1) {
-  const input = h('input', { type: 'number', min: String(min), max: String(max), step: String(passo), value: String(valor) });
-  input.onchange = () => {
-    const v = Math.min(max, Math.max(min, Number(input.value) || min));
-    input.value = String(v);
-    aoMudar(v);
-    mudou();
-  };
-  return campo(rotulo, input);
-}
-
-function seletor<T extends string | number>(rotulo: string, lista: [T, string][], valor: T, aoMudar: (v: T) => void) {
-  const select = h('select');
-  for (const [v, nome] of lista) select.append(h('option', { value: String(v), selected: v === valor }, nome));
-  select.onchange = () => {
-    aoMudar(lista[select.selectedIndex][0]);
-    mudou();
-  };
-  return campo(rotulo, select);
-}
-
-function botao(texto: string, aoClicar: () => void, classe = ''): HTMLButtonElement {
-  return h('button', { className: classe, onclick: aoClicar }, texto);
-}
-
-function explicacao(linhas: string[]) {
-  return h('details', { className: 'explica' }, h('summary', {}, 'O que isso faz?'), h('ul', {}, ...linhas.map((l) => h('li', {}, l))));
-}
-
-function baixar(blob: Blob, nome: string) {
-  h('a', { href: URL.createObjectURL(blob), download: nome }).click();
+  irParaPagina(pagina);
 }
 
 // ---------- estrutura da página ----------
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const aviso = h('p', { className: 'aviso', role: 'status' });
-const botaoTocar = h('button', { className: 'principal' }, '▶ Tocar');
-const botaoGravar = h('button', { className: 'gravar' }, '● Gravar voz');
+const botaoTocar = h('button', { className: 'principal', title: 'Tocar / parar (Espaço)' }, '▶ Tocar');
+const botaoGravar = h('button', { className: 'gravar', title: 'Gravar voz (R)' }, '● Gravar voz');
 const tempo = h('span', { className: 'tempo' }, '0:00');
+const visorInfo = h('span', { className: 'visor-info' });
 const barraDeTempo = h('input', { type: 'range', min: '0', max: '1', step: '0.01', value: '0', ariaLabel: 'Posição na música' });
-const medidor = h('div', { className: 'medidor' }, h('div'));
-const secTransporte = h('section', { className: 'transporte' });
-const barraDeAcoes = h('div', { className: 'linha acoes' });
-const secEstilo = h('section');
-const secBeat = h('section');
-const secVozes = h('section');
-const secGravar = h('section');
-const secMaster = h('section');
-const trilha = so(h('nav', { className: 'trilha', ariaLabel: 'Etapas' }));
+const medidor = h('div', { className: 'medidor', title: 'Nível de saída' }, h('div'));
+const secTransporte = h('header', { className: 'transporte' });
+const pagina_ = (nome: string) => h('section', { className: 'pagina', id: `pagina-${nome}` });
+const secEstilo = pagina_('estilo');
+const secCanais = pagina_('canais');
+const secNotas = pagina_('notas');
+const secArranjo = pagina_('arranjo');
+const secGravar = pagina_('gravar');
+const secVozes = pagina_('efeitos');
+const secMixer = pagina_('mixer');
+const secMaster = pagina_('master');
+const secProjeto = pagina_('projeto');
+const trilha = h('nav', { className: 'trilha', ariaLabel: 'Páginas' });
 const rodape = so(h('div', { className: 'linha rodape' }));
 const contagemEl = h('div', { className: 'contagem' });
 const medidorDeEntrada = h('div', { className: 'medidor' }, h('div'));
 
-// No modo simples aparece uma etapa por vez, nesta ordem.
-const ETAPAS = [
-  { nome: 'Estilo', secao: secEstilo },
-  { nome: 'Beat', secao: secBeat },
-  { nome: 'Gravar', secao: secGravar },
-  { nome: 'Voz', secao: secVozes },
-  { nome: 'Exportar', secao: secMaster },
-];
-let etapa = Math.min(ETAPAS.length - 1, Number(sessionStorage.getItem('estudio-aberto:etapa')) || 0);
-if (telaSimples && etapa >= 2) modo = 'musica';
+// Cada página é uma parte do trabalho, na ordem em que a música nasce.
+// A tela simples mostra só as marcadas com `simples`.
+const PAGINAS = [
+  { id: 'estilo', nome: 'Estilo', secao: secEstilo, simples: true },
+  { id: 'canais', nome: 'Beat', secao: secCanais, simples: true },
+  { id: 'notas', nome: 'Notas', secao: secNotas, simples: false },
+  { id: 'arranjo', nome: 'Arranjo', secao: secArranjo, simples: false },
+  { id: 'gravar', nome: 'Gravar', secao: secGravar, simples: true },
+  { id: 'efeitos', nome: 'Voz', secao: secVozes, simples: true },
+  { id: 'mixer', nome: 'Mixer', secao: secMixer, simples: false },
+  { id: 'master', nome: 'Master', secao: secMaster, simples: true },
+  { id: 'projeto', nome: 'Projeto', secao: secProjeto, simples: true },
+] as const;
+type PaginaId = (typeof PAGINAS)[number]['id'];
+const paginasVisiveis = () => PAGINAS.filter((p) => !telaSimples || p.simples);
+let pagina: PaginaId = (PAGINAS.find((p) => p.id === sessionStorage.getItem('estudio-aberto:pagina'))?.id) ?? 'estilo';
+if (telaSimples && !etapaDeBeat()) modo = 'musica';
 
-function irParaEtapa(i: number) {
-  const tocava = engine.tocando && !gravando;
-  if (tocava) parar();
-  etapa = Math.max(0, Math.min(ETAPAS.length - 1, i));
-  sessionStorage.setItem('estudio-aberto:etapa', String(etapa));
-  // Nas etapas de beat, tocar repete o padrão; nas de voz, toca a música com as vozes.
-  if (telaSimples) {
-    modo = etapa < 2 ? 'padrao' : 'musica';
-    desenharTransporte();
-  }
+/** Nas páginas de criação do beat, tocar repete o padrão; nas demais, toca a música com as vozes. */
+function etapaDeBeat() {
+  return pagina === 'estilo' || pagina === 'canais' || pagina === 'notas';
+}
+
+function irParaPagina(destino: PaginaId) {
+  if (engine.tocando && !gravando && telaSimples) parar();
+  pagina = paginasVisiveis().some((p) => p.id === destino) ? destino : 'estilo';
+  sessionStorage.setItem('estudio-aberto:pagina', pagina);
+  if (telaSimples) modo = etapaDeBeat() ? 'padrao' : 'musica';
+  // Estas páginas mostram valores que podem ter mudado em outra página.
+  if (pagina === 'mixer') desenharMixer();
+  if (pagina === 'efeitos') desenharVozes();
+  if (pagina === 'arranjo') desenharBeat();
+  desenharTransporte();
   desenharTrilha();
-  if (telaSimples) window.scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 });
+}
+
+/** Avança ou volta na ordem das páginas visíveis. */
+function irParaEtapa(i: number) {
+  const visiveis = paginasVisiveis();
+  if (visiveis[i]) irParaPagina(visiveis[i].id);
 }
 
 function desenharTrilha() {
-  ETAPAS.forEach((e, i) => e.secao.classList.toggle('ativa', i === etapa));
-  trilha.replaceChildren(...ETAPAS.map((e, i) => botao(`${i + 1}. ${e.nome}`, () => irParaEtapa(i), i === etapa ? 'ativo' : '')));
-  const voltar = botao('← Voltar', () => irParaEtapa(etapa - 1));
-  voltar.disabled = etapa === 0;
-  const proxima = ETAPAS[etapa + 1];
-  rodape.replaceChildren(voltar, proxima ? botao(`Avançar: ${proxima.nome} →`, () => irParaEtapa(etapa + 1), 'principal') : h('span'));
+  const visiveis = paginasVisiveis();
+  for (const p of PAGINAS) p.secao.classList.toggle('ativa', p.id === pagina);
+  trilha.replaceChildren(...visiveis.map((p, i) => Object.assign(botao(p.nome, () => irParaPagina(p.id), p.id === pagina ? 'ativo' : ''), { title: `Página ${i + 1}` })));
+  const atual = visiveis.findIndex((p) => p.id === pagina);
+  const voltar = botao('← Voltar', () => irParaEtapa(atual - 1));
+  voltar.disabled = atual <= 0;
+  const proxima = visiveis[atual + 1];
+  rodape.replaceChildren(voltar, proxima ? botao(`Avançar: ${proxima.nome} →`, () => irParaEtapa(atual + 1), 'principal') : h('span'));
 }
 
-app.append(
-  h('header', {}, h('h1', {}, 'Estúdio Aberto'), h('p', {}, 'Crie o beat, grave a voz, mixe e exporte. Tudo no navegador.')),
-  secTransporte, barraDeAcoes, aviso, trilha,
-  h('div', { className: 'colunas' },
-    h('div', { className: 'coluna' }, secEstilo, secBeat),
-    h('div', { className: 'coluna' }, secGravar, secVozes, secMaster),
-  ),
-  rodape,
-);
+app.append(secTransporte, trilha, aviso, h('main', {}, ...PAGINAS.map((p) => p.secao)), rodape);
 
 const avisar = (texto: string) => (aviso.textContent = texto);
 
@@ -265,17 +232,22 @@ const avisar = (texto: string) => (aviso.textContent = texto);
 
 function desenharTransporte() {
   const modos = h('div', { className: 'abas' },
-    botao('Só este padrão', () => trocarModo('padrao'), modo === 'padrao' ? 'ativo' : ''),
-    botao('Música inteira', () => trocarModo('musica'), modo === 'musica' ? 'ativo' : ''),
+    Object.assign(botao('PAD', () => trocarModo('padrao'), modo === 'padrao' ? 'ativo' : ''), { title: 'Tocar só o padrão aberto, em repetição' }),
+    Object.assign(botao('MÚSICA', () => trocarModo('musica'), modo === 'musica' ? 'ativo' : ''), { title: 'Tocar a música inteira, com as vozes' }),
   );
-  secTransporte.replaceChildren(h('div', { className: 'linha' }, botaoTocar, botaoGravar, tempo, barraDeTempo));
-  barraDeAcoes.replaceChildren(
+  secTransporte.replaceChildren(
+    h('strong', { className: 'marca' }, 'Estúdio Aberto'),
+    h('div', { className: 'grupo' }, botaoTocar, botaoGravar),
     av(modos),
-    botao(telaSimples ? 'Mostrar tudo' : 'Tela simples', trocarTela, telaSimples ? '' : 'ativo'),
-    botao('Desfazer', () => navegarHistorico(-1)),
-    botao('Refazer', () => navegarHistorico(1)),
+    h('div', { className: 'visor' }, tempo, visorInfo),
+    barraDeTempo,
+    medidor,
+    h('div', { className: 'grupo' },
+      Object.assign(botao('↶', () => navegarHistorico(-1)), { title: 'Desfazer (Ctrl/⌘+Z)', ariaLabel: 'Desfazer' }),
+      Object.assign(botao('↷', () => navegarHistorico(1)), { title: 'Refazer (Ctrl/⌘+Shift+Z)', ariaLabel: 'Refazer' }),
+      botao(telaSimples ? 'Mostrar tudo' : 'Tela simples', trocarTela, telaSimples ? '' : 'ativo'),
+    ),
   );
-  barraDeTempo.hidden = modo === 'padrao';
 }
 
 function trocarModo(novo: 'padrao' | 'musica') {
@@ -300,12 +272,7 @@ async function tocar() {
 }
 
 function emLoop() {
-  return (modo === 'padrao' || etapaDeBeat()) && projeto.beat.fonte === 'padrao' && !gravando;
-}
-
-/** No modo simples, as etapas de estilo e beat sempre repetem o padrão; as de voz tocam a música. */
-function etapaDeBeat() {
-  return telaSimples && etapa < 2;
+  return (modo === 'padrao' || (telaSimples && etapaDeBeat())) && projeto.beat.fonte === 'padrao' && !gravando;
 }
 
 function reiniciarSeTocando() {
@@ -406,8 +373,7 @@ async function terminarGravacao() {
   }
 
   const take = novoTake(id(), `Take ${projeto.takes.length + 1}`, id(), inicio, projeto.voz);
-  take.reverb = PRESETS_VOZ[take.preset].reverb;
-  take.delay = PRESETS_VOZ[take.preset].delay;
+  aplicarTimbre(take, take.preset);
   const buffer = engine.ctx.createBuffer(1, amostras.length, g.taxa);
   buffer.copyToChannel(amostras, 0);
   engine.buffers.set(take.audioId, buffer);
@@ -478,7 +444,7 @@ function desenharEstilo() {
   };
   const genero = GENEROS[projeto.genero];
   secEstilo.replaceChildren(
-    h('h2', {}, '1. Estilo'),
+    h('h2', {}, 'Estilo'),
     campo('Nome da música', nome),
     h('p', { className: 'nota' }, 'Ouça os estilos e escolha um ponto de partida. Dá para mudar tudo depois.'),
     h('div', { className: 'cartoes' }, ...Object.keys(GENEROS).map(cartaoDeGenero)),
@@ -589,6 +555,38 @@ function gradeDeNotas(ligado: (linha: number, passo: number) => boolean, definir
   return grade;
 }
 
+/** Abas para escolher, criar e duplicar padrões; aparecem nas três páginas do beat. */
+function abasDePadrao(): HTMLElement {
+  const padrao = projeto.padroes[padraoAtual];
+  return h('div', { className: 'abas' },
+    ...projeto.padroes.map((p, i) => botao(p.nome, () => abrirPadrao(i), i === padraoAtual ? 'ativo' : '')),
+    botao('+ Novo', () => {
+      projeto.padroes.push(padraoVazio(`Padrão ${projeto.padroes.length + 1}`));
+      abrirPadrao(projeto.padroes.length - 1);
+    }),
+    botao('Duplicar', () => {
+      projeto.padroes.push({ ...structuredClone(padrao), nome: `${padrao.nome} 2` });
+      abrirPadrao(projeto.padroes.length - 1);
+    }),
+  );
+}
+
+/** Visão da música inteira: os padrões em sequência e, abaixo, onde cada voz entra. */
+function linhaDoTempo(): HTMLElement {
+  const blocos = projeto.beat.fonte === 'arquivo'
+    ? [h('div', { className: 'bloco-padrao' }, projeto.beat.nomeArquivo ?? 'Beat importado')]
+    : projeto.arranjo.map((b) => {
+        const bloco = h('div', { className: 'bloco-padrao' + (b.padrao === padraoAtual ? ' atual' : ''), title: 'Abrir este padrão' }, `${projeto.padroes[b.padrao]?.nome ?? '?'} ×${b.vezes}`);
+        bloco.style.flexGrow = String(b.vezes);
+        bloco.onclick = () => abrirPadrao(b.padrao);
+        return bloco;
+      });
+  return h('div', { className: 'playlist' },
+    h('div', { className: 'pista' }, h('span', { className: 'nome-linha' }, 'Beat'), h('div', { className: 'blocos' }, ...blocos)),
+    ...projeto.takes.map((take) => h('div', { className: 'pista' }, h('span', { className: 'nome-linha' }, take.nome), onda(take))),
+  );
+}
+
 function desenharBeat() {
   const beat = projeto.beat;
   colunas = Array.from({ length: STEPS }, () => []);
@@ -610,13 +608,27 @@ function desenharBeat() {
   };
   const espaco = h('label', { className: 'caixa' }, caixaEspaco, 'Abrir espaço no beat para a voz');
 
+  secArranjo.replaceChildren(
+    h('h2', {}, 'Arranjo'),
+    h('p', { className: 'nota' }, 'A música inteira de uma vez: a ordem dos padrões e onde cada voz entra. Clique numa voz para ouvir a partir daquele ponto.'),
+    linhaDoTempo(),
+    ...(beat.fonte === 'padrao' ? [
+      h('h3', {}, 'Ordem dos padrões'),
+      arranjo(),
+      explicacao([
+        'O arranjo é a ordem em que os padrões tocam para formar a música: intro, verso, refrão, pausa.',
+        'Crie variações com "Duplicar" e mude pouca coisa: tirar o bumbo e o 808 por 2 compassos e devolver depois já cria impacto.',
+      ]),
+    ] : []),
+  );
+
   if (beat.fonte === 'arquivo') {
     const arquivo = h('input', { type: 'file', accept: 'audio/*' });
     arquivo.onchange = () => arquivo.files?.[0] && importarBeat(arquivo.files[0]);
-    secBeat.replaceChildren(
-      h('h2', {}, '2. Beat'), abas,
+    secCanais.replaceChildren(
+      h('h2', {}, 'Beat'), abas,
       campo('Arquivo de áudio (MP3, WAV...)', arquivo),
-      h('p', { className: 'nota' }, beat.nomeArquivo ? `Beat atual: ${beat.nomeArquivo}` : 'Nenhum beat importado ainda.'),
+      h('p', { className: 'nota' }, beat.nomeArquivo ? `Beat atual: ${beat.nomeArquivo}` : 'Nenhum beat importado ainda. Você também pode arrastar o arquivo para a janela.'),
       sugestaoDoBeat(),
       h('div', { className: 'linha' },
         numero('BPM do beat', 60, 200, projeto.bpm, (v) => { projeto.bpm = v; desenharEstilo(); }),
@@ -631,22 +643,12 @@ function desenharBeat() {
         'Abrir espaço faz um corte suave no beat em 3 kHz, a região onde mora a clareza da letra. Baixar um pouco o volume do beat também ajuda.',
       ]),
     );
+    secNotas.replaceChildren(h('h2', {}, 'Notas'), h('p', { className: 'nota' }, 'Esta página edita o 808 e a melodia de um beat criado aqui. Com um beat importado, ela não é usada.'));
     return;
   }
 
   const padrao = projeto.padroes[padraoAtual];
   const emUso = (i: number) => projeto.arranjo.some((b) => b.padrao === i);
-  const abasDePadrao = h('div', { className: 'abas' },
-    ...projeto.padroes.map((p, i) => botao(p.nome, () => abrirPadrao(i), i === padraoAtual ? 'ativo' : '')),
-    botao('+ Novo', () => {
-      projeto.padroes.push(padraoVazio(`Padrão ${projeto.padroes.length + 1}`));
-      abrirPadrao(projeto.padroes.length - 1);
-    }),
-    botao('Duplicar', () => {
-      projeto.padroes.push({ ...structuredClone(padrao), nome: `${padrao.nome} 2` });
-      abrirPadrao(projeto.padroes.length - 1);
-    }),
-  );
   const nomeDoPadrao = h('input', { type: 'text', value: padrao.nome });
   nomeDoPadrao.onchange = () => {
     padrao.nome = nomeDoPadrao.value || 'Padrão';
@@ -681,19 +683,18 @@ function desenharBeat() {
     linhaDeDeslize.append(b);
   }
 
-  secBeat.replaceChildren(
-    h('h2', {}, '2. Beat'), abas,
-    h('p', { className: 'nota so-simples' }, 'O beat do gênero já vem pronto: aperte Tocar. Toque nos quadrados para mudar a bateria. Em "Mostrar tudo" ficam o 808, a melodia, os samples e o arranjo.'),
-    av(h('h3', {}, 'Padrões')),
-    av(abasDePadrao),
+  secCanais.replaceChildren(
+    h('h2', {}, 'Beat'), abas,
+    h('p', { className: 'nota so-simples' }, 'O beat do estilo já vem pronto: aperte Tocar. Clique nos quadrados para mudar a bateria. Em "Mostrar tudo" ficam o 808, a melodia, os samples e o arranjo.'),
+    av(h('h3', {}, 'Padrão')),
+    av(abasDePadrao()),
     av(h('div', { className: 'linha' }, campo('Nome do padrão', nomeDoPadrao), apagar)),
-
     h('h3', {}, 'Bateria'),
     h('div', { className: 'linha' },
       seletor<KitId>('Kit', opcoes(KITS, (k) => KITS[k].nome), projeto.kit, (v) => { projeto.kit = v; }),
       deslizante('Volume', 0, 1.2, 0.01, projeto.volumes.bateria, (v) => { projeto.volumes.bateria = v; }),
     ),
-    av(campo('Pincel: o que um toque escreve', pinceis)),
+    av(campo('Pincel: o que um clique escreve', pinceis)),
     gradeDeBateria(),
     av(samples()),
     explicacao([
@@ -701,52 +702,46 @@ function desenharBeat() {
       'Fraco: toca baixinho. Notas fracas entre as fortes dão balanço.',
       'Rolo: repete o som 2, 3 ou 4 vezes dentro de um quadrado. É o chimbal acelerado do trap.',
     ]),
-
-    av(h('div', {},
-      h('h3', {}, '808'),
-      deslizante('Volume', 0, 1.2, 0.01, projeto.volumes.baixo, (v) => { projeto.volumes.baixo = v; }),
-      sample808(),
-      h('div', { className: 'rolagem' },
-        gradeDeNotas(
-          (l, s) => padrao.baixo[s] === l,
-          (l, s, ligar) => {
-            if (ligar) padrao.baixo[s] = l;
-            else if (padrao.baixo[s] === l) padrao.baixo[s] = -1;
-          },
-        ),
-        linhaDeDeslize,
-      ),
-      explicacao([
-        'O 808 é o grave que dá peso. Ele toca uma nota por vez e soa até a próxima nota.',
-        'As linhas são as notas da escala da música; a de baixo é a nota principal (tônica). Colocar o 808 junto com o bumbo é o ponto de partida mais seguro.',
-        'Deslizar: a nota começa na altura da anterior e escorrega até a nova. É a marca do drill e do trap.',
-      ]),
-
-      h('h3', {}, 'Melodia'),
-      h('div', { className: 'linha' },
-        seletor<InstrumentoId>('Instrumento', opcoes(INSTRUMENTOS, (k) => INSTRUMENTOS[k]), projeto.instrumento, (v) => { projeto.instrumento = v; }),
-        deslizante('Volume', 0, 1.2, 0.01, projeto.volumes.melodia, (v) => { projeto.volumes.melodia = v; }),
-      ),
-      h('div', { className: 'rolagem' },
-        gradeDeNotas(
-          (l, s) => padrao.melodia[l][s],
-          (l, s, ligar) => { padrao.melodia[l][s] = ligar; },
-        ),
-      ),
-      explicacao([
-        'Só aparecem notas da escala, então qualquer combinação soa bem junta.',
-        'Notas na mesma coluna tocam ao mesmo tempo e formam um acorde. Pulando uma linha entre elas (1ª, 3ª, 5ª) sai o acorde básico.',
-      ]),
-
-      h('h3', {}, 'Arranjo'),
-      arranjo(),
-      explicacao([
-        'O arranjo é a ordem em que os padrões tocam para formar a música: intro, verso, refrão, pausa.',
-        'Crie variações com "Duplicar" e mude pouca coisa: tirar o bumbo e o 808 por 2 compassos e devolver depois já cria impacto.',
-      ]),
-    )),
     volume,
     espaco,
+  );
+
+  secNotas.replaceChildren(
+    h('h2', {}, 'Notas'),
+    abasDePadrao(),
+    h('h3', {}, '808'),
+    deslizante('Volume', 0, 1.2, 0.01, projeto.volumes.baixo, (v) => { projeto.volumes.baixo = v; }),
+    sample808(),
+    h('div', { className: 'rolagem' },
+      gradeDeNotas(
+        (l, s) => padrao.baixo[s] === l,
+        (l, s, ligar) => {
+          if (ligar) padrao.baixo[s] = l;
+          else if (padrao.baixo[s] === l) padrao.baixo[s] = -1;
+        },
+      ),
+      linhaDeDeslize,
+    ),
+    explicacao([
+      'O 808 é o grave que dá peso. Ele toca uma nota por vez e soa até a próxima nota.',
+      'As linhas são as notas da escala da música; a de baixo é a nota principal (tônica). Colocar o 808 junto com o bumbo é o ponto de partida mais seguro.',
+      'Deslizar: a nota começa na altura da anterior e escorrega até a nova. É a marca do drill e do trap.',
+    ]),
+    h('h3', {}, 'Melodia'),
+    h('div', { className: 'linha' },
+      seletor<InstrumentoId>('Instrumento', opcoes(INSTRUMENTOS, (k) => INSTRUMENTOS[k]), projeto.instrumento, (v) => { projeto.instrumento = v; }),
+      deslizante('Volume', 0, 1.2, 0.01, projeto.volumes.melodia, (v) => { projeto.volumes.melodia = v; }),
+    ),
+    h('div', { className: 'rolagem' },
+      gradeDeNotas(
+        (l, s) => padrao.melodia[l][s],
+        (l, s, ligar) => { padrao.melodia[l][s] = ligar; },
+      ),
+    ),
+    explicacao([
+      'Só aparecem notas da escala, então qualquer combinação soa bem junta.',
+      'Notas na mesma coluna tocam ao mesmo tempo e formam um acorde. Pulando uma linha entre elas (1ª, 3ª, 5ª) sai o acorde básico.',
+    ]),
   );
 }
 
@@ -972,148 +967,30 @@ async function importarBeat(arquivo: File) {
 /** Com que ajustes cada take foi afinado por último, para não refazer à toa. */
 const afinadoCom = new Map<string, string>();
 
+/** Refaz o processamento prévio de um take: limpeza (gate, de-esser) e afinação. */
 async function reafinar(take: Take) {
   const chave = take.audioId + ':tune';
   const original = engine.buffers.get(take.audioId);
-  if (!usaTune(take) || !original) return;
+  if (!usaProcessamento(take) || !original) return;
   // Com o tune desligado, só a mudança de altura é aplicada (intensidade 0).
   const intensidade = take.tune.ligado ? take.tune.intensidade : 0;
-  const ajustes = [projeto.tom, projeto.escala, take.tune.velocidade, intensidade, take.altura].join('|');
+  const tune = usaTune(take)
+    ? { tom: projeto.tom, escala: projeto.escala, velocidade: take.tune.velocidade, intensidade, transpor: take.altura }
+    : undefined;
+  const ajustes = JSON.stringify([tune, take.limpeza]);
   if (afinadoCom.get(take.audioId) === ajustes && engine.buffers.has(chave)) return;
-  avisar(`Processando a afinação de ${take.nome}...`);
-  const afinado = await afinarEmSegundoPlano(original.getChannelData(0), original.sampleRate, {
-    tom: projeto.tom, escala: projeto.escala, velocidade: take.tune.velocidade, intensidade, transpor: take.altura,
-  });
-  const buffer = engine.ctx.createBuffer(1, afinado.length, original.sampleRate);
-  buffer.copyToChannel(afinado, 0);
+  avisar(`Processando ${take.nome}...`);
+  const pronto = await processarEmSegundoPlano(original.getChannelData(0), original.sampleRate, { gate: take.limpeza.gate, deEsser: take.limpeza.deEsser, tune });
+  const buffer = engine.ctx.createBuffer(1, pronto.length, original.sampleRate);
+  buffer.copyToChannel(pronto, 0);
   engine.buffers.set(chave, buffer);
   afinadoCom.set(take.audioId, ajustes);
-  avisar(take.tune.ligado ? `${take.nome} afinado em ${NOTAS[projeto.tom]} ${projeto.escala}.` : `Altura de ${take.nome} ajustada.`);
+  avisar(take.tune.ligado ? `${take.nome} afinado em ${NOTAS[projeto.tom]} ${projeto.escala}.` : `${take.nome} processado.`);
   reiniciarSeTocando();
 }
 
 async function reafinarTodos() {
   for (const take of projeto.takes) await reafinar(take);
-}
-
-function desenharTake(take: Take): HTMLElement {
-  const nome = h('input', { type: 'text', value: take.nome, ariaLabel: 'Nome do take' });
-  nome.onchange = () => {
-    take.nome = nome.value;
-    mudou();
-  };
-  const mudo = botao(take.mudo ? 'Mudo' : 'Ouvindo', () => {
-    take.mudo = !take.mudo;
-    mudou();
-    desenharVozes();
-    void desenharGravar();
-  }, take.mudo ? 'ativo' : '');
-  const apagar = botao('Apagar', () => {
-    projeto.takes = projeto.takes.filter((t) => t.id !== take.id);
-    mudou();
-    desenharVozes();
-    void desenharGravar();
-    reiniciarSeTocando();
-    avisar(`${take.nome} apagado. Use "Desfazer" se foi engano.`);
-  }, 'perigo');
-  const tune = h('input', { type: 'checkbox', checked: take.tune.ligado });
-  tune.onchange = () => {
-    take.tune.ligado = tune.checked;
-    mudou();
-    void reafinar(take).then(reiniciarSeTocando);
-  };
-
-  const telefone = h('input', { type: 'checkbox', checked: take.telefone });
-  telefone.onchange = () => {
-    take.telefone = telefone.checked;
-    mudou();
-  };
-  const refazerTune = () => void reafinar(take);
-  const sinal = (v: number) => (v > 0 ? `+${v}` : String(v));
-
-  // Controles por intenção (modo simples): cada um move vários ajustes de uma vez.
-  const NIVEIS_DE_TUNE: [string, boolean, number, number][] = [
-    ['Sem tune', false, 0.2, 1], ['Leve', true, 0.6, 0.6], ['Forte', true, 0.25, 1], ['Robô', true, 0, 1],
-  ];
-  const tuneAtual = !take.tune.ligado ? 0 : take.tune.velocidade <= 0.05 ? 3 : take.tune.intensidade < 0.8 ? 1 : 2;
-  const niveisDeTune = h('div', { className: 'abas' }, ...NIVEIS_DE_TUNE.map(([rotulo, ligado, velocidade, intensidade], i) =>
-    botao(rotulo, () => {
-      take.tune = { ligado, velocidade, intensidade };
-      mudou();
-      desenharVozes();
-      void reafinar(take).then(reiniciarSeTocando);
-    }, i === tuneAtual ? 'ativo' : ''),
-  ));
-  const distancia = deslizante('Perto ↔ longe', 0, 1, 0.01, Math.min(1, Math.max(0, (take.reverb - 0.02) / 0.5)), (v) => {
-    take.reverb = 0.02 + v * 0.5;
-    take.tamanhoReverb = v < 0.34 ? 'quarto' : v < 0.67 ? 'sala' : 'salao';
-  });
-  const eco = deslizante('Seca ↔ com eco', 0, 1, 0.01, Math.min(1, take.delay / 0.5), (v) => {
-    take.delay = v * 0.5;
-    take.repeticoes = 0.2 + v * 0.4;
-  });
-
-  return h('article', { className: 'take' },
-    h('div', { className: 'linha' }, nome, mudo, apagar),
-    onda(take),
-    so(campo('Afinação', niveisDeTune)),
-    so(h('div', { className: 'linha' }, distancia, eco)),
-    h('div', { className: 'linha' },
-      deslizante('Volume', 0, 1.5, 0.01, take.volume, (v) => { take.volume = v; }),
-      av(deslizante('Lado (esq. / dir.)', -1, 1, 0.05, take.pan, (v) => { take.pan = v; })),
-      av(numero('Início (s)', -5, 3600, Number(take.inicio.toFixed(3)), (v) => { take.inicio = v; reiniciarSeTocando(); }, 0.005)),
-    ),
-    seletor<PresetVoz>('Timbre', opcoes(PRESETS_VOZ, (k) => PRESETS_VOZ[k].nome), take.preset, (v) => {
-      take.preset = v;
-      take.reverb = PRESETS_VOZ[v].reverb;
-      take.delay = PRESETS_VOZ[v].delay;
-      desenharVozes();
-    }),
-    explicacao(PRESETS_VOZ[take.preset].explicacao),
-
-    av(h('h4', {}, 'Afinação')),
-    av(h('div', { className: 'linha' },
-      h('label', { className: 'caixa' }, tune, 'Tune'),
-      deslizante('Robótico ↔ natural', 0, 1, 0.05, take.tune.velocidade, (v) => { take.tune.velocidade = v; }, refazerTune),
-      deslizante('Quanto corrige', 0, 1, 0.05, take.tune.intensidade, (v) => { take.tune.intensidade = v; }, refazerTune),
-    )),
-    av(deslizante(`Altura da voz: ${sinal(take.altura)} semitons (grossa ↔ fina)`, -12, 12, 1, take.altura, (v) => { take.altura = v; }, () => {
-      refazerTune();
-      desenharVozes();
-    })),
-    av(explicacao([
-      'Tune: puxa cada nota cantada para a nota mais próxima da escala da música (definida em "Estilo").',
-      'Robótico pula direto para a nota: é o efeito marcante do trap e do plug. Natural desliza até ela e quase não se percebe.',
-      '"Quanto corrige" em 100% leva a voz até a nota exata; valores menores só aproximam, preservando o jeito de cantar.',
-      'Altura sobe ou desce a voz inteira sem mudar a velocidade: +12 é uma oitava acima (fina), -12 uma abaixo (grossa). Funciona mesmo com o tune desligado.',
-    ])),
-
-    av(h('h4', {}, 'Reverb (espaço)')),
-    av(h('div', { className: 'linha' },
-      deslizante('Quantidade', 0, 0.8, 0.01, take.reverb, (v) => { take.reverb = v; }),
-      seletor<TamanhoReverb>('Tamanho', opcoes(TAMANHOS_DE_REVERB, (k) => TAMANHOS_DE_REVERB[k].nome), take.tamanhoReverb, (v) => { take.tamanhoReverb = v; }),
-    )),
-    av(h('h4', {}, 'Delay (eco)')),
-    av(h('div', { className: 'linha' },
-      deslizante('Quantidade', 0, 0.8, 0.01, take.delay, (v) => { take.delay = v; }),
-      seletor<DivisaoDelay>('Tempo', [[4, '1 batida'], [8, '1/2 batida'], [16, '1/4 de batida']], take.divisaoDelay, (v) => { take.divisaoDelay = v; }),
-      deslizante('Repetições', 0, 0.75, 0.01, take.repeticoes, (v) => { take.repeticoes = v; }),
-    )),
-    av(h('h4', {}, 'Caráter')),
-    av(h('div', { className: 'linha' },
-      deslizante('Distorção', 0, 1, 0.05, take.distorcao, (v) => { take.distorcao = v; }),
-      h('label', { className: 'caixa' }, telefone, 'Voz de telefone'),
-    )),
-    explicacao([
-      'Afinação: "Leve" só aproxima das notas certas; "Forte" corrige tudo sem soar artificial; "Robô" é o efeito marcante do trap e do plug.',
-      'Perto ↔ longe controla o reverb, que simula um ambiente: pouco deixa a voz próxima, muito deixa distante e grandiosa. Em excesso, embola a letra.',
-      'Seca ↔ com eco controla o delay, que repete a voz no tempo do beat.',
-      'Reverb simula o som de um ambiente. Quarto deixa a voz próxima; salão deixa distante e grandiosa. Em excesso, embola a letra.',
-      'Delay repete a voz em eco, no tempo do beat. "Repetições" define quantas vezes o eco volta antes de sumir.',
-      'Distorção deixa a voz áspera e agressiva, como no hard e no trash. Voz de telefone corta graves e agudos, um efeito comum em intros e respostas.',
-      'Dica de dobra: grave o mesmo trecho duas vezes e jogue um take para cada lado. A voz fica larga.',
-    ]),
-  );
 }
 
 /** Um take "cobre" um trecho se tem pelo menos um pouco de áudio dentro dele. */
@@ -1214,6 +1091,12 @@ function montagem(): HTMLElement {
 
 /** Forma de onda do take ao longo da música, com a agulha de reprodução. Clicar leva a música àquele ponto. */
 let agulhas: HTMLElement[] = [];
+/** Take aberto na página de voz e tela de efeito escolhida. */
+let takeAberto: string | null = null;
+let telaAberta: Tela = 'Afinação';
+/** Atualizações por quadro (medidores) das páginas de voz e do mixer; refeitas a cada redesenho. */
+let quadrosDaVoz: (() => void)[] = [];
+let quadrosDoMixer: (() => void)[] = [];
 
 function onda(take: Take): HTMLElement {
   const buffer = engine.buffers.get(take.audioId);
@@ -1261,7 +1144,14 @@ async function conferirEquilibrio() {
 }
 
 function desenharVozes() {
-  agulhas = [];
+  quadrosDaVoz = [];
+  desenharMixer();
+  const take = projeto.takes.find((t) => t.id === takeAberto) ?? projeto.takes[0];
+  if (!take) {
+    secVozes.replaceChildren(h('h2', {}, 'Voz'), h('p', { className: 'nota' }, 'Nenhum take ainda. Grave sua voz na página "Gravar" e volte aqui para tratar o som dela.'));
+    return;
+  }
+  takeAberto = take.id;
   const comparar = botao(semEfeitos ? 'Ouvindo SEM efeitos' : 'Comparar: ouvir sem efeitos', () => {
     semEfeitos = !semEfeitos;
     engine.mixer.sincronizar(projetoParaTocar());
@@ -1269,13 +1159,110 @@ function desenharVozes() {
     desenharVozes();
   }, semEfeitos ? 'ativo' : '');
   comparar.title = 'Alterna entre a voz tratada e a voz crua, para ouvir o que os efeitos fazem';
+
+  const nome = h('input', { type: 'text', value: take.nome, ariaLabel: 'Nome do take' });
+  nome.onchange = () => {
+    take.nome = nome.value;
+    mudou();
+    desenharVozes();
+    void desenharGravar();
+  };
+  const mudo = botao(take.mudo ? 'Mudo' : 'Ouvindo', () => {
+    take.mudo = !take.mudo;
+    mudou();
+    desenharVozes();
+    void desenharGravar();
+  }, take.mudo ? 'ativo' : '');
+  const apagar = botao('Apagar', () => {
+    projeto.takes = projeto.takes.filter((t) => t.id !== take.id);
+    mudou();
+    desenharVozes();
+    void desenharGravar();
+    reiniciarSeTocando();
+    avisar(`${take.nome} apagado. Use "Desfazer" se foi engano.`);
+  }, 'perigo');
+
+  // Controles por intenção (tela simples): cada um move vários ajustes de uma vez.
+  const NIVEIS_DE_TUNE: [string, boolean, number, number][] = [
+    ['Sem tune', false, 0.2, 1], ['Leve', true, 0.6, 0.6], ['Forte', true, 0.25, 1], ['Robô', true, 0, 1],
+  ];
+  const tuneAtual = !take.tune.ligado ? 0 : take.tune.velocidade <= 0.05 ? 3 : take.tune.intensidade < 0.8 ? 1 : 2;
+  const niveisDeTune = h('div', { className: 'abas' }, ...NIVEIS_DE_TUNE.map(([rotulo, ligado, velocidade, intensidade], i) =>
+    botao(rotulo, () => {
+      take.tune = { ligado, velocidade, intensidade };
+      mudou();
+      desenharVozes();
+      void reafinar(take).then(reiniciarSeTocando);
+    }, i === tuneAtual ? 'ativo' : ''),
+  ));
+  const distancia = deslizante('Perto ↔ longe', 0, 1, 0.01, Math.min(1, Math.max(0, (take.reverb - 0.02) / 0.5)), (v) => {
+    take.reverb = 0.02 + v * 0.5;
+    take.tamanhoReverb = v < 0.34 ? 'quarto' : v < 0.67 ? 'sala' : 'salao';
+  });
+  const eco = deslizante('Seca ↔ com eco', 0, 1, 0.01, Math.min(1, take.delay / 0.5), (v) => {
+    take.delay = v * 0.5;
+    take.repeticoes = 0.2 + v * 0.4;
+  });
+
+  const contexto = {
+    projeto, engine,
+    reprocessar: (t: Take) => void reafinar(t),
+    redesenhar: () => {
+      mudou();
+      desenharVozes();
+    },
+    aCadaQuadro: (fn: () => void) => quadrosDaVoz.push(fn),
+  };
+
   secVozes.replaceChildren(
-    h('h2', {}, '4. Voz'),
-    projeto.takes.length === 0
-      ? h('p', { className: 'nota' }, 'Nenhum take ainda. Grave sua voz na etapa "Gravar" e volte aqui para ajustar o som dela.')
-      : h('div', { className: 'linha' }, comparar, botao('Conferir equilíbrio voz × beat', () => void conferirEquilibrio())),
-    ...projeto.takes.map(desenharTake),
+    h('h2', {}, 'Voz'),
+    h('div', { className: 'abas' }, ...projeto.takes.map((t) => botao(t.nome, () => {
+      takeAberto = t.id;
+      desenharVozes();
+    }, t.id === take.id ? 'ativo' : ''))),
+    h('div', { className: 'linha' }, nome, mudo, apagar),
+    onda(take),
+    h('div', { className: 'linha' }, comparar, botao('Conferir equilíbrio voz × beat', () => void conferirEquilibrio())),
+
+    // Tela simples: poucas decisões, por intenção.
+    so(seletor<PresetVoz>('Timbre', opcoes(PRESETS_VOZ, (k) => PRESETS_VOZ[k].nome), take.preset, (v) => {
+      aplicarTimbre(take, v);
+      desenharVozes();
+    })),
+    so(campo('Afinação', niveisDeTune)),
+    so(h('div', { className: 'linha' }, distancia, eco, deslizante('Volume', 0, 1.5, 0.01, take.volume, (v) => { take.volume = v; }))),
+    so(explicacao([
+      ...PRESETS_VOZ[take.preset].explicacao,
+      'Afinação: "Leve" só aproxima das notas certas; "Forte" corrige tudo sem soar artificial; "Robô" é o efeito marcante do trap e do plug.',
+      'Perto ↔ longe controla o reverb, que simula um ambiente. Seca ↔ com eco controla o delay, que repete a voz no tempo do beat.',
+      'Em "Mostrar tudo" cada ferramenta tem a sua tela: equalizador, compressor, limpeza de ruído, edição do take e mais.',
+    ])),
+
+    // Tela completa: uma tela por ferramenta.
+    av(h('div', { className: 'abas telas' }, ...TELAS.map((t) => botao(t, () => {
+      telaAberta = t;
+      desenharVozes();
+    }, t === telaAberta ? 'ativo' : '')))),
+    av(telaDeEfeito(telaAberta, take, contexto)),
     ...(projeto.takes.length > 1 ? [av(h('h3', {}, 'Montagem: o melhor de cada take')), av(montagem())] : []),
+  );
+}
+
+// ---------- mixer ----------
+
+function desenharMixer() {
+  quadrosDoMixer = [];
+  secMixer.replaceChildren(
+    h('h2', {}, 'Mixer'),
+    mesa({
+      projeto, engine, mudou,
+      aCadaQuadro: (fn) => quadrosDoMixer.push(fn),
+      abrirEfeitos: (take) => {
+        takeAberto = take.id;
+        irParaPagina('efeitos');
+      },
+      redesenhar: desenharMixer,
+    }),
   );
 }
 
@@ -1331,7 +1318,7 @@ async function desenharGravar() {
   });
 
   secGravar.replaceChildren(
-    h('h2', {}, '3. Gravar'),
+    h('h2', {}, 'Gravar'),
     h('p', { className: 'nota' }, 'Coloque o fone (de preferência com fio), aperte gravar e cante em cima do beat. A gravação começa de onde a música estiver; cada gravação vira um take.'),
     h('div', { className: 'linha palco' }, botaoGravarGrande, contagemEl),
     campo('Nível do microfone', medidorDeEntrada),
@@ -1378,29 +1365,50 @@ function desenharMaster() {
       const lufs = Number.isFinite(r.lufs) ? `${r.lufs.toFixed(1)} LUFS` : 'silêncio';
       const comparacao = !Number.isFinite(r.lufs) || partes !== 'tudo' ? ''
         : r.lufs > -13 ? ' Mais alto que o padrão do Spotify (-14): a plataforma vai abaixar o volume.'
-        : r.lufs < -16 ? ' Mais baixo que o padrão do Spotify (-14): experimente o acabamento "Alto".'
+        : r.lufs < -16 ? ' Mais baixo que o padrão do Spotify (-14).'
         : ' Dentro do padrão do Spotify (-14).';
       resultado.textContent = `Pronto. Volume: ${lufs}, pico ${r.picoDb.toFixed(1)} dBFS.${comparacao}`;
     } catch {
       resultado.textContent = 'A exportação falhou.';
     }
   };
-  const abrir = h('input', { type: 'file', accept: '.json,application/json' });
-  abrir.onchange = () => abrir.files?.[0] && void abrirDeArquivo(abrir.files[0]);
+  const a = projeto.ajusteDoMaster;
+  const db = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
+  const banda = (rotulo: string, chave: 'graveDb' | 'medioDb' | 'agudoDb') =>
+    giratorio({ rotulo, min: -6, max: 6, valor: a[chave], padrao: 0, formato: db, aoMudar: (v) => { a[chave] = v; } });
 
   secMaster.replaceChildren(
-    h('h2', {}, '5. Master e exportação'),
-    seletor<PresetMaster>('Acabamento', opcoes(PRESETS_MASTER, (k) => PRESETS_MASTER[k].nome), projeto.master, (v) => {
-      projeto.master = v;
-      desenharMaster();
-    }),
-    explicacao([
-      ...PRESETS_MASTER[projeto.master].explicacao,
-      'Na exportação, um limitador de pico garante que nada passe de -1 dBFS, a folga pedida pelas plataformas de streaming.',
-      'WAV (16 bits, 44,1 kHz) é o formato aceito pelas distribuidoras. MP3 é para mandar no WhatsApp e ouvir no celular.',
-      'LUFS mede o quão alto a música soa. O Spotify ajusta tudo para -14 LUFS: passar muito disso não deixa a música mais alta lá, só mais achatada.',
-    ]),
-    campo('Nível de saída', medidor),
+    h('h2', {}, 'Master'),
+    h('p', { className: 'nota' }, 'O master é o acabamento da música inteira, depois que voz e beat já estão equilibrados no mixer.'),
+    h('div', { className: 'aparelho' },
+      h('div', { className: 'aparelho-titulo' }, 'Acabamento'),
+      h('div', { className: 'aparelho-corpo' },
+        h('div', { className: 'fileira' },
+          seletor<PresetMaster>('Compressão e volume', opcoes(PRESETS_MASTER, (k) => PRESETS_MASTER[k].nome), projeto.master, (v) => {
+            projeto.master = v;
+            desenharMaster();
+          }),
+          av(banda('Grave', 'graveDb')),
+          av(banda('Médio', 'medioDb')),
+          av(banda('Agudo', 'agudoDb')),
+          av(giratorio({ rotulo: 'Largura', min: 0, max: 2, valor: a.largura, padrao: 1, formato: (v) => (v < 0.05 ? 'Mono' : `${Math.round(v * 100)}%`), aoMudar: (v) => { a.largura = v; } })),
+        ),
+        seletor('Volume final da exportação', [
+          ['nenhum', 'Não ajustar'],
+          ['-16', '-16 LUFS (mais dinâmica; Apple Music)'],
+          ['-14', '-14 LUFS (Spotify, YouTube)'],
+          ['-11', '-11 LUFS (alto; SoundCloud, carro, festa)'],
+        ] as [string, string][], a.alvoLufs === null ? 'nenhum' : String(a.alvoLufs), (v) => { a.alvoLufs = v === 'nenhum' ? null : Number(v); }),
+        explicacao([
+          ...PRESETS_MASTER[projeto.master].explicacao,
+          'Grave, médio e agudo: ajuste fino do tom da música inteira. Use pouco (1 a 2 dB); se precisar de muito, o problema está na mix.',
+          'Largura: abre ou fecha o estéreo. Acima de 100% a música parece mais larga; em "Mono" você confere como ela soa em caixa de som de celular.',
+          'Volume final: a exportação mede o volume percebido da música (em LUFS) e ajusta para o alvo. As plataformas igualam o volume de todas as músicas, então passar do alvo delas não deixa a sua mais alta lá.',
+          'Depois de tudo, um limitador de pico garante que nada passe de -1 dBFS, a folga pedida pelas plataformas.',
+        ]),
+      ),
+    ),
+    h('h3', {}, 'Exportar'),
     h('div', { className: 'linha' },
       Object.assign(botao('Exportar música (WAV)', () => void exportar('tudo', ''), 'principal'), { id: 'exportar-wav' }),
       botao('MP3 para compartilhar', () => void exportar('tudo', '', true)),
@@ -1408,7 +1416,18 @@ function desenharMaster() {
       av(botao('Só o beat', () => void exportar('beat', ' - beat'))),
     ),
     resultado,
-    h('h3', {}, 'Projeto'),
+    explicacao([
+      'WAV (16 bits, 44,1 kHz) é o formato aceito pelas distribuidoras. MP3 é para mandar no WhatsApp e ouvir no celular.',
+      '"Só as vozes" e "Só o beat" servem para mandar a outra pessoa mixar ou para fazer versões (acapella, instrumental).',
+    ]),
+  );
+}
+
+function desenharProjeto() {
+  const abrir = h('input', { type: 'file', accept: '.json,application/json' });
+  abrir.onchange = () => abrir.files?.[0] && void abrirDeArquivo(abrir.files[0]);
+  secProjeto.replaceChildren(
+    h('h2', {}, 'Projeto'),
     h('p', { className: 'nota' }, 'O projeto é salvo sozinho neste navegador. Salve em arquivo para guardar cópia, trocar de aparelho ou mandar para alguém gravar junto.'),
     h('div', { className: 'linha' },
       botao('Salvar projeto em arquivo', () => void salvarEmArquivo()),
@@ -1419,7 +1438,7 @@ function desenharMaster() {
     h('details', { className: 'explica atalhos' },
       h('summary', {}, 'Atalhos do teclado'),
       h('ul', {}, ...ATALHOS.map(([tecla, acao]) => h('li', {}, h('kbd', {}, tecla), ` ${acao}`))),
-      h('p', {}, 'No computador também dá para pintar a grade arrastando o mouse e soltar um arquivo de áudio ou de projeto em qualquer lugar da janela.'),
+      h('p', {}, 'No computador também dá para pintar a grade arrastando o mouse, girar os botões arrastando para cima e para baixo (com Shift, devagar) e soltar um arquivo de áudio ou de projeto em qualquer lugar da janela.'),
     ),
     botao('Começar música nova', () => {
       if (!confirm('Começar uma música nova? Dá para voltar com "Desfazer" enquanto a página estiver aberta.')) return;
@@ -1445,11 +1464,11 @@ let conviteDeInstalacao: EventoDeInstalacao | undefined;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   conviteDeInstalacao = e as EventoDeInstalacao;
-  desenharMaster();
+  desenharProjeto();
 });
 window.addEventListener('appinstalled', () => {
   conviteDeInstalacao = undefined;
-  desenharMaster();
+  desenharProjeto();
 });
 
 function instalacao(): HTMLElement {
@@ -1489,6 +1508,9 @@ function quadro() {
     : loop ? `Padrão: ${projeto.padroes[padraoAtual]?.nome ?? ''}`
     : `${relogio(pos)} / ${relogio(duracao)}`;
   barraDeTempo.hidden = loop || !!previa;
+  visorInfo.textContent = `${projeto.bpm} BPM · ${NOTAS[projeto.tom]} ${projeto.escala}`;
+  agulhas = agulhas.filter((a) => a.isConnected);
+  for (const fn of pagina === 'efeitos' ? quadrosDaVoz : pagina === 'mixer' ? quadrosDoMixer : []) fn();
   for (const a of agulhas) a.style.left = `${Math.min(100, (pos / duracao) * 100)}%`;
 
   // Contagem regressiva antes da gravação e nível do microfone durante ela.
@@ -1522,6 +1544,7 @@ function desenharTudo() {
   desenharVozes();
   void desenharGravar();
   desenharMaster();
+  desenharProjeto();
 }
 
 // ---------- computador: atalhos de teclado e arrastar arquivos ----------
@@ -1535,7 +1558,7 @@ const ATALHOS: [string, string][] = [
   ['Ctrl/⌘ + E', 'Exportar música (WAV)'],
   ['← →', 'Voltar / avançar 5 segundos'],
   ['Home', 'Voltar ao início'],
-  ['1 a 5', 'Ir para a etapa (tela simples)'],
+  ['1 a 9', 'Ir para a página'],
 ];
 
 window.addEventListener('keydown', (e) => {
@@ -1567,7 +1590,7 @@ window.addEventListener('keydown', (e) => {
     irPara(engine.posicao() + (e.key === 'ArrowLeft' ? -5 : 5));
   } else if (e.key === 'Home') {
     irPara(0);
-  } else if (telaSimples && e.key >= '1' && e.key <= '5') {
+  } else if (e.key >= '1' && e.key <= '9') {
     irParaEtapa(Number(e.key) - 1);
   }
 });
@@ -1611,7 +1634,7 @@ window.addEventListener('drop', (e) => {
   const arquivo = e.dataTransfer?.files[0];
   if (!arquivo) return;
   if (arquivo.name.endsWith('.json')) void abrirDeArquivo(arquivo);
-  else if (arquivo.type.startsWith('audio/')) void importarBeat(arquivo).then(() => irParaEtapa(1));
+  else if (arquivo.type.startsWith('audio/')) void importarBeat(arquivo).then(() => irParaPagina('canais'));
   else avisar('Solte um arquivo de áudio (para usar como beat) ou um projeto .estudio.json.');
 });
 
