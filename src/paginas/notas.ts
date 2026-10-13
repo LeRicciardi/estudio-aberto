@@ -1,12 +1,13 @@
 // Página Notas: 808 e melodia em grade de notas.
 
-import { INSTRUMENTOS } from '../engine/synths.ts';
+import { INSTRUMENTOS, SINTETIZADOR_PADRAO } from '../engine/synths.ts';
 import { fatiar } from '../engine/tempo-e-fatias.ts';
 import { engine, estado, id, mudou } from '../estado.ts';
-import { type InstrumentoId, NOTAS, type Padrao, nomeDoGrau, passosDoPadrao } from '../model/project.ts';
+import { tocarGrau } from '../midi.ts';
+import { type InstrumentoId, LINHAS, NOTAS, type Padrao, type Sintetizador, nomeDoGrau, passosDoPadrao } from '../model/project.ts';
 import { avisar, secNotas } from '../moldura.ts';
 import { guardarAudio } from '../storage.ts';
-import { botao, campo, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
+import { botao, campo, deslizante, explicacao, giratorio, h, opcoes, seletor } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
 import { abasDePadrao, dimensionar, gradeDeNotas, pintavel } from './grades.ts';
 
@@ -190,6 +191,72 @@ function sampler(padrao: Padrao): HTMLElement {
   );
 }
 
+let tecladoNoBaixo = false;
+
+/** Teclado na tela: só as notas da escala, para tocar com o dedo ou o mouse. */
+function teclado(): HTMLElement {
+  const teclas = Array.from({ length: LINHAS }, (_, grau) => {
+    const tecla = h('button', { className: 'tecla' + (grau % 7 === 0 ? ' tonica' : '') }, nomeDoGrau(grau, estado.projeto.tom, estado.projeto.escala));
+    tecla.onpointerdown = (e) => {
+      e.preventDefault();
+      tocarGrau(grau, tecladoNoBaixo);
+    };
+    return tecla;
+  });
+  return h('div', {},
+    h('div', { className: 'abas' },
+      botao('Tocar a melodia', () => { tecladoNoBaixo = false; desenharBeat(); }, tecladoNoBaixo ? '' : 'ativo'),
+      botao('Tocar o 808', () => { tecladoNoBaixo = true; desenharBeat(); }, tecladoNoBaixo ? 'ativo' : ''),
+    ),
+    h('div', { className: 'teclado' }, ...teclas),
+    h('p', { className: 'nota' }, 'Toque para ouvir. Com o padrão tocando em repetição (modo PAD), o que você tocar é escrito na grade.'),
+  );
+}
+
+/** Painel do sintetizador próprio: forma de onda, oitava, filtro e envelope. */
+function painelDoSintetizador(): HTMLElement {
+  const s = (estado.projeto.sintetizador ??= { ...SINTETIZADOR_PADRAO });
+  const ms = (v: number) => (v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(1)} s`);
+  return h('div', { className: 'aparelho' },
+    h('div', { className: 'aparelho-titulo' }, 'Meu sintetizador'),
+    h('div', { className: 'aparelho-corpo' },
+      h('div', { className: 'fileira' },
+        seletor<Sintetizador['onda']>('Forma de onda', [['sine', 'Seno (puro)'], ['triangle', 'Triângulo (suave)'], ['sawtooth', 'Serra (cheio)'], ['square', 'Quadrada (oca)']], s.onda, (v) => { s.onda = v; }),
+        giratorio({ rotulo: 'Oitava', min: -2, max: 2, passo: 1, valor: s.oitava, padrao: 0, formato: (v) => `${v > 0 ? '+' : ''}${v}`, aoMudar: (v) => { s.oitava = v; } }),
+        giratorio({ rotulo: 'Desafinar', min: 0, max: 40, valor: s.desafinar, padrao: 8, formato: (v) => `${v.toFixed(0)} cents`, aoMudar: (v) => { s.desafinar = v; } }),
+        giratorio({ rotulo: 'Filtro', min: 200, max: 12000, log: true, valor: s.filtro, padrao: 2500, formato: (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`), aoMudar: (v) => { s.filtro = v; } }),
+        giratorio({ rotulo: 'Ataque', min: 0.003, max: 1, log: true, valor: s.ataque, padrao: 0.01, formato: ms, aoMudar: (v) => { s.ataque = v; } }),
+        giratorio({ rotulo: 'Soltura', min: 0.05, max: 3, log: true, valor: s.soltura, padrao: 0.4, formato: ms, aoMudar: (v) => { s.soltura = v; } }),
+      ),
+      explicacao([
+        'Quase todo sintetizador funciona assim: uma onda cheia de harmônicos passa por um filtro que tira agudos, e um envelope diz como a nota entra e some.',
+        'Forma de onda: seno é puro, sem brilho; serra é cheia e brilhante; quadrada soa oca, como jogo antigo.',
+        'Desafinar soma uma segunda onda um pouco fora do tom: as duas "batem" e o som engorda.',
+        'Filtro baixo deixa o som escuro e macio; alto, brilhante e na cara.',
+        'Ataque curto dá um som percussivo (pluck); longo, um som que cresce (pad). Soltura é quanto a nota demora para sumir.',
+      ]),
+    ),
+  );
+}
+
+/**
+ * Arpejo: as notas de cada acorde, em vez de tocarem juntas, tocam uma
+ * depois da outra, subindo, a cada meio tempo, até o próximo acorde.
+ */
+function arpejar(padrao: Padrao) {
+  const passos = passosDoPadrao(padrao);
+  const acordes: { passo: number; notas: number[] }[] = [];
+  for (let s = 0; s < passos; s++) {
+    const notas = padrao.melodia.map((linha, g) => (linha[s] ? g : -1)).filter((g) => g >= 0);
+    if (notas.length >= 2) acordes.push({ passo: s, notas });
+  }
+  acordes.forEach((acorde, i) => {
+    const fim = acordes[i + 1]?.passo ?? passos;
+    for (const g of acorde.notas) padrao.melodia[g][acorde.passo] = false;
+    for (let s = acorde.passo, k = 0; s < fim; s += 2, k++) padrao.melodia[acorde.notas[k % acorde.notas.length]][s] = true;
+  });
+}
+
 export function desenharNotas() {
   if (estado.projeto.beat.fonte === 'arquivo') {
     secNotas.replaceChildren(h('h2', {}, 'Notas'), h('p', { className: 'nota' }, 'Esta página edita o 808 e a melodia de um beat criado aqui. Com um beat importado, ela não é usada.'));
@@ -212,6 +279,7 @@ export function desenharNotas() {
   secNotas.replaceChildren(
     h('h2', {}, 'Notas'),
     abasDePadrao(),
+    teclado(),
     h('h3', {}, '808'),
     deslizante('Volume', 0, 1.2, 0.01, estado.projeto.volumes.baixo, (v) => { estado.projeto.volumes.baixo = v; }),
     sample808(),
@@ -235,9 +303,18 @@ export function desenharNotas() {
     h('h3', {}, 'Melodia'),
     acordes(padrao),
     h('div', { className: 'linha' },
-      seletor<InstrumentoId>('Instrumento', opcoes(INSTRUMENTOS, (k) => INSTRUMENTOS[k]), estado.projeto.instrumento, (v) => { estado.projeto.instrumento = v; }),
+      seletor<InstrumentoId>('Instrumento', opcoes(INSTRUMENTOS, (k) => INSTRUMENTOS[k]), estado.projeto.instrumento, (v) => {
+        estado.projeto.instrumento = v;
+        desenharBeat();
+      }),
       deslizante('Volume', 0, 1.2, 0.01, estado.projeto.volumes.melodia, (v) => { estado.projeto.volumes.melodia = v; }),
+      botao('Arpejar os acordes', () => {
+        arpejar(padrao);
+        mudou();
+        desenharBeat();
+      }),
     ),
+    estado.projeto.instrumento === 'meu' ? painelDoSintetizador() : '',
     h('div', { className: 'rolagem' },
       gradeDeNotas(
         (l, s) => padrao.melodia[l][s],

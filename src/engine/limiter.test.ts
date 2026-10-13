@@ -1,6 +1,6 @@
 // Teste do limitador sem navegador (roda em `npm test`).
 
-import { limitar } from './limiter.ts';
+import { limitar, picoRealDb } from './limiter.ts';
 
 const TAXA = 44100;
 let falhas = 0;
@@ -34,5 +34,11 @@ for (let i = 0; i < baixo.length; i++) baixo[i] = 0.5 * Math.sin((2 * Math.PI * 
 const copia = baixo.slice();
 limitar([baixo], TAXA, -1);
 conferir('não mexe em som abaixo do teto', baixo.every((v, i) => Math.abs(v - copia[i]) < 1e-6), '');
+
+// Pico real: um seno a 1/4 da taxa, defasado, tem samples em 0,707 mas a onda chega a 1,0.
+const entre = new Float32Array(TAXA).map((_, i) => Math.sin((2 * Math.PI * (TAXA / 4) * i) / TAXA + Math.PI / 4));
+conferir('mede o pico real entre os samples', Math.abs(picoRealDb([entre])) < 0.15 && pico(entre) < 0.72, `${picoRealDb([entre]).toFixed(2)} dBTP com samples em ${pico(entre).toFixed(3)}`);
+limitar([entre], TAXA, -1);
+conferir('limita pelo pico real, não pelo sample', picoRealDb([entre]) <= -0.9, `${picoRealDb([entre]).toFixed(2)} dBTP`);
 
 if (falhas) throw new Error(`${falhas} teste(s) falharam`);

@@ -47,18 +47,58 @@ Consolidação de seis pesquisas feitas em outubro de 2026, cada uma com um esco
 | Biblioteca de sons maior | Feito em parte: mais seis percussões em domínio público (cowbell, agogô, chocalho, pandeiro, clave, cabasa). Não há 808 nem bateria eletrônica com licença verificável |
 | Colaboração em tempo real | **Não feito em tempo real.** Feito o caminho sem servidor: enviar o projeto pelo "compartilhar" e juntar as vozes do arquivo de um parceiro, sem perder as próprias |
 
+## Rodada do nível profissional
+
+Duas pesquisas (áudio e processamento; fluxo de trabalho, confiabilidade e validação) e uma leitura dos manuais públicos do FL Studio, do FL Studio Mobile e da página do OneKnob Louder. Dos manuais só se tirou o comportamento descrito para o usuário; faixas, desenho e código são nossos.
+
+| Achado | Situação |
+|---|---|
+| Teto medido em pico real (dBTP), não em pico de sample | Feito: o limitador reconstrói a onda entre os samples (4x) |
+| Dither ao reduzir para 16 bits; MP3 em 320 kbps | Feito |
+| Distorção sem aliasing; filtro de subgrave no master | Feito: saturador com sobreamostragem 4x; passa-altas em 20 Hz |
+| Reverb com pré-atraso, primeiras reflexões e agudos que somem antes | Feito |
+| Gravação que não se perde se a aba fechar | Feito: cada pedaço gravado vai para um cofre no aparelho e é oferecido de volta ao abrir |
+| Tela que não apaga gravando; armazenamento persistente; aviso de espaço cheio; versões automáticas | Feito |
+| Pré-escuta antes do ponto ao regravar | Feito |
+| "Copiar diagnóstico" para relatar problema | Feito |
+| Pedaleira: cada efeito da voz como um pedal com chave de pé (FL Hardcore) | Feito, com desenho próprio; liga e desliga cada efeito sem perder o ajuste |
+| Chorus | Feito, no pedal de dobra |
+| Equalizador com pontos arrastáveis sobre a curva (Parametric EQ 2) | Feito |
+| Um botão grande de volume final (OneKnob Louder) | Feito, ligado ao alvo em LUFS |
+| Analisador de espectro ao vivo (FL Mobile) | Feito, no Master |
+| Compressor multibanda de 3 faixas | Feito: cruzamentos em 150 Hz e 4 kHz, um botão só |
+| Automação de volume desenhada na linha do tempo | Feito para o beat e para cada voz; outros parâmetros ainda não |
+| Solo por canal e cores por canal no mixer | Feito |
+| Sintetizador simples (onda, oitava, desafinação, filtro, envelope) | Feito, como instrumento "meu" |
+| Arpejo dos acordes | Feito: sobe pelas notas do acorde a cada meio tempo |
+| Teclado na tela | Feito, preso à escala |
+| Presets próprios da cadeia de voz | Feito, guardados no navegador |
+
+### Ainda falta para o nível profissional
+
+- **Compressor próprio em AudioWorklet.** O compressor do navegador aplica ganho de compensação sozinho e não tem entrada lateral nem antecipação. É a maior diferença de som para um programa profissional.
+- **Limitador com visor rolante** (entrada, saída e redução), como o do FL.
+- **Mandadas e retornos** (um reverb só para várias vozes) e entrada lateral escolhida por canal.
+- **Automação de outros parâmetros** (filtro, reverb, lado) e curvas além da reta.
+- **Edição livre do áudio**: corte em qualquer ponto, inverter, normalizar, tirar cliques.
+- **Equalizador**: filtros de 24 dB por oitava, monitor por centro e lados, correção da deformação perto do agudo máximo.
+- **Medidores**: faixa de volume (LRA), correlação estéreo, vetorscópio.
+- **Qualidade do tune**: marcas de período e formantes melhores; redução de ruído MMSE.
+- **Grade**: deslocamento fino e repetição por nota; dedilhado; cortar notas; marcadores com ação.
+- **Testes automáticos de ponta a ponta** no navegador e matriz de aparelhos reais.
+- **Tradução** e auditoria de acessibilidade.
+
 ## O que as pesquisas trouxeram e ainda não entrou
 
 - **Comparar com uma música de referência**, com o volume igualado.
 - **Equalização do beat separando centro e lados** (mid-side) e equalizador dinâmico contra aspereza.
 - **Tirar eco de sala** de uma gravação (de-reverb).
 - **Efeito de meia velocidade e parada de fita** (half-time, tape stop).
-- **Volume contínuo, lado e altura por nota**, probabilidade e humanização; arpejo e dedilhado.
+- **Volume contínuo, lado e altura por nota**, probabilidade e humanização; dedilhado.
 - **Áudio para notas** (cantarolar a melodia ou o 808).
 - **Rimas e sílabas poéticas em português**; histórico de versões de cada verso.
 - **Comentários com marcação de tempo** para receber opinião sobre a música.
 - **Etiquetas em WAV e AIFF** e cabeçalho que alinhe o MP3 ao primeiro tempo em todos os programas de DJ.
-- **Regravar em laço com pré-escuta** (alguns segundos antes do ponto) em vez de contagem.
 - **Desafios e lições curtas** dentro do estúdio.
 - **Acessibilidade para leitor de tela**, que não foi auditada.
 - **Medição de desempenho em celular de entrada.**
@@ -70,6 +110,8 @@ Ficam de fora por decisão: separação de voz e instrumentos por IA, geração 
 - Nada foi ouvido por uma pessoa: todos os testes são medições. Timbres, tune, harmonia, sampler, esticamento e redução de ruído precisam do ouvido de quem usa.
 - Gravação com microfone real, celular de entrada e iPhone continuam sem teste. A gravação em laço foi testada com microfone simulado.
 - O teclado MIDI foi escrito sem um controlador ligado para testar.
+- O cofre de gravação, a tela sempre ligada e a pré-escuta passam na verificação de tipos, mas não foram exercitados com uma queda real da aba nem em celular.
+- Os presets de voz usam a caixa de texto do navegador para o nome e não foram testados no aplicativo instalado.
 - O recebimento pelo "compartilhar" foi testado enviando o arquivo ao service worker no computador, não a partir de um celular com o aplicativo instalado.
 - Os limiares do diagnóstico, do "ajustar ao meu take", do teste de ambiente e da detecção de afinação foram calibrados com sinais sintéticos.
 

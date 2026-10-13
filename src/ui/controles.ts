@@ -15,6 +15,9 @@ export function ligarMudanca(fn: (agrupar?: boolean) => void) {
   avisarMudanca = fn;
 }
 
+/** Para controles desenhados à mão (como os pontos do equalizador) avisarem que o projeto mudou. */
+export const mudancaFeita = (agrupar = false) => avisarMudanca(agrupar);
+
 export const opcoes = <T extends string>(mapa: Record<T, unknown>, nome: (k: T) => string) => (Object.keys(mapa) as T[]).map((k) => [k, nome(k)] as [T, string]);
 
 export function campo(rotulo: string, controle: HTMLElement): HTMLLabelElement {

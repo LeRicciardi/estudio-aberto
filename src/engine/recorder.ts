@@ -15,6 +15,7 @@ export class Gravador {
   private fonte: MediaStreamAudioSourceNode | undefined;
   private no: AudioWorkletNode | undefined;
   private blocos: Float32Array[] = [];
+  private entregues = 0;
   private inicio = 0;
   private moduloCarregado = false;
   /** Atraso de entrada informado pelo dispositivo, em segundos. */
@@ -39,6 +40,7 @@ export class Gravador {
     const config = this.stream.getAudioTracks()[0].getSettings() as MediaTrackSettings & { latency?: number };
     this.latenciaDeEntrada = config.latency ?? 0;
     this.blocos = [];
+    this.entregues = 0;
     this.inicio = 0;
     this.fonte = this.ctx.createMediaStreamSource(this.stream);
     this.no = new AudioWorkletNode(this.ctx, 'captura', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
@@ -51,6 +53,22 @@ export class Gravador {
     };
     // O nó precisa estar ligado à saída para ser processado; ele não emite som.
     this.fonte.connect(this.no).connect(this.ctx.destination);
+  }
+
+  /**
+   * O que foi gravado desde a última chamada. Serve para ir guardando a
+   * gravação aos poucos: se a página cair no meio do take, quase nada se perde.
+   */
+  novos(): Float32Array {
+    const fatia = this.blocos.slice(this.entregues);
+    this.entregues = this.blocos.length;
+    const junto = new Float32Array(fatia.reduce((n, b) => n + b.length, 0));
+    let pos = 0;
+    for (const b of fatia) {
+      junto.set(b, pos);
+      pos += b.length;
+    }
+    return junto;
   }
 
   parar(): Gravacao {

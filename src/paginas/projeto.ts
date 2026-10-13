@@ -5,7 +5,7 @@ import { ATALHOS } from '../atalhos.ts';
 import { type EventoDeInstalacao, engine, estado, mudou } from '../estado.ts';
 import { novoProjeto } from '../model/generos.ts';
 import { avisar, secProjeto } from '../moldura.ts';
-import { abrirVersao, apagarAudio, empacotarProjeto, guardarVersao, juntarVozes, listarVersoes } from '../storage.ts';
+import { abrirVersao, apagarAudio, empacotarProjeto, espaco, guardarVersao, juntarVozes, listarVersoes } from '../storage.ts';
 import { desenharTudo, parar } from '../transporte.ts';
 import { botao, campo, h } from '../ui/controles.ts';
 
@@ -36,8 +36,35 @@ async function enviarProjeto() {
   else await salvarEmArquivo();
 }
 
+const armazenamento = h('p', { className: 'nota' });
+
+async function desenharEspaco() {
+  const e = await espaco();
+  armazenamento.textContent = e
+    ? `Em uso: ${e.usado.toFixed(0)} MB de ${e.total > 1024 ? `${(e.total / 1024).toFixed(1)} GB` : `${e.total.toFixed(0)} MB`} disponíveis. ${e.protegido ? 'O navegador marcou estes dados como protegidos contra limpeza automática.' : 'O navegador ainda não marcou estes dados como protegidos; usar o estúdio com frequência ou instalar o aplicativo ajuda.'}`
+    : '';
+}
+
+/** Junta as informações do aparelho que ajudam a investigar um problema, para colar numa mensagem. */
+async function copiarDiagnostico() {
+  const e = await espaco();
+  const ctx = engine.ctx;
+  const linhas = [
+    'Estúdio Aberto: diagnóstico',
+    `Navegador: ${navigator.userAgent}`,
+    `Tela: ${innerWidth} × ${innerHeight}, toque: ${navigator.maxTouchPoints > 0 ? 'sim' : 'não'}, instalado: ${matchMedia('(display-mode: standalone)').matches ? 'sim' : 'não'}`,
+    `Áudio: ${ctx.sampleRate} Hz, atraso de saída ${Math.round(((ctx.outputLatency || 0) + ctx.baseLatency) * 1000)} ms, atraso medido ${estado.projeto.latenciaMs ?? 'não medido'} ms`,
+    `Memória do aparelho: ${(navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? '?'} GB, núcleos: ${navigator.hardwareConcurrency ?? '?'}`,
+    `Espaço: ${e ? `${e.usado.toFixed(0)} MB de ${e.total.toFixed(0)} MB, protegido: ${e.protegido ? 'sim' : 'não'}` : 'desconhecido'}`,
+    `MIDI: ${'requestMIDIAccess' in navigator ? 'disponível' : 'indisponível'}, compartilhar arquivos: ${'canShare' in navigator ? 'sim' : 'não'}`,
+    `Projeto: ${estado.projeto.takes.length} takes, ${estado.projeto.padroes.length} padrões, beat ${estado.projeto.beat.fonte}`,
+  ];
+  await navigator.clipboard.writeText(linhas.join('\n')).then(() => avisar('Diagnóstico copiado. Cole na mensagem ao relatar um problema.'), () => avisar(linhas.join(' | ')));
+}
+
 export function desenharProjeto() {
   void desenharVersoes();
+  void desenharEspaco();
   const parceiro = h('input', { type: 'file', accept: '.json,application/json' });
   parceiro.onchange = async () => {
     const arquivo = parceiro.files?.[0];
@@ -67,6 +94,10 @@ export function desenharProjeto() {
       botao('Enviar o projeto', () => void enviarProjeto()),
       campo('Juntar as vozes do arquivo de um parceiro', parceiro),
     ),
+    h('h3', {}, 'Segurança dos seus dados'),
+    armazenamento,
+    h('p', { className: 'nota' }, 'Tudo fica só neste aparelho, dentro do navegador. Limpar os dados do navegador apaga os projetos; no iPhone, o Safari pode apagar dados de sites que ficam uma semana sem uso (instalar o aplicativo evita isso). Salve em arquivo o que for importante.'),
+    botao('Copiar diagnóstico do aparelho', () => void copiarDiagnostico()),
     h('h3', {}, 'Versões'),
     h('p', { className: 'nota' }, 'Guarde um retrato da música antes de mexer em algo arriscado. Cada exportação também guarda uma versão. Ficam neste navegador, até 15.'),
     botao('Guardar versão agora', () => void guardarVersao(estado.projeto, 'Manual').then(desenharProjeto)),

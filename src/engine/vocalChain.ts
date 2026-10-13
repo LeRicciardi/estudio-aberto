@@ -115,18 +115,34 @@ const impulsos = new WeakMap<BaseAudioContext, Map<TamanhoReverb, AudioBuffer>>(
 
 /**
  * Resposta ao impulso sintética: ruído que decai, como o eco difuso de uma
- * sala. Quanto mais longo o decaimento, maior o espaço parece.
+ * sala. Quanto mais longo o decaimento, maior o espaço parece. Começa 18 ms
+ * depois da voz (pré-delay), para a letra não ficar embaçada.
  */
 function impulsoDeSala(ctx: BaseAudioContext, tamanho: TamanhoReverb): AudioBuffer {
   let porTamanho = impulsos.get(ctx);
   if (!porTamanho) impulsos.set(ctx, (porTamanho = new Map()));
   let b = porTamanho.get(tamanho);
   if (!b) {
-    const n = Math.floor(ctx.sampleRate * TAMANHOS_DE_REVERB[tamanho].segundos);
-    b = ctx.createBuffer(2, n, ctx.sampleRate);
+    const taxa = ctx.sampleRate;
+    const pre = Math.floor(taxa * 0.018);
+    const n = Math.floor(taxa * TAMANHOS_DE_REVERB[tamanho].segundos);
+    b = ctx.createBuffer(2, pre + n, taxa);
     for (let c = 0; c < 2; c++) {
       const d = b.getChannelData(c);
-      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 3;
+      // Cauda: ruído que decai, com os agudos sumindo antes dos graves, como
+      // numa sala de verdade (o ar e as paredes absorvem mais os agudos).
+      let y = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / n;
+        const abertura = 0.85 - 0.72 * t;
+        y += abertura * (Math.random() * 2 - 1 - y);
+        d[pre + i] = (y * (1 - t) ** 3) / Math.sqrt(abertura);
+      }
+      // Primeiras reflexões: alguns ecos nítidos logo no começo, diferentes em
+      // cada lado, que dão ao ouvido a noção do tamanho do lugar.
+      for (const [ms, ganho] of [[7, 0.55], [11, -0.45], [17, 0.4], [23, -0.32], [31, 0.26], [41, -0.2]]) {
+        d[pre + Math.floor(taxa * (ms + c * 2.5) * 0.001)] += ganho;
+      }
     }
     porTamanho.set(tamanho, b);
   }
@@ -234,11 +250,12 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
   balanco.frequency.value = 0.35;
   balanco.start();
   nos.push(dobra, balanco);
+  const ondulacoes: { ganho: GainNode; lado: number }[] = [];
   for (const [atraso, lado] of [[0.017, -0.85], [0.026, 0.85]]) {
     const linha = ctx.createDelay(0.1);
     linha.delayTime.value = atraso;
     const variacao = ctx.createGain();
-    variacao.gain.value = 0.0015 * Math.sign(lado);
+    ondulacoes.push({ ganho: variacao, lado });
     balanco.connect(variacao).connect(linha.delayTime);
     const posicao = ctx.createStereoPanner();
     posicao.pan.value = lado;
@@ -278,7 +295,12 @@ export function criarCadeiaDeVoz(ctx: BaseAudioContext, take: Take, bpm: number)
     segundo.ratio.value = t.comp.dupla ? 2 : 1;
     paralela.gain.value = (t.comp.paralela ?? 0) * 0.7;
     compensa.gain.value = 10 ** (t.comp.ganho / 20);
-    dobra.gain.value = t.dobra * 0.6;
+    // Chorus: as mesmas cópias, ondulando mais fundo e mais depressa. O atraso
+    // variando muda levemente a afinação delas, e a soma soa como um coro.
+    const chorus = t.chorus ?? 0;
+    balanco.frequency.value = 0.35 + chorus * 2.2;
+    for (const o of ondulacoes) o.ganho.gain.value = (0.0015 + chorus * 0.005) * Math.sign(o.lado);
+    dobra.gain.value = Math.max(t.dobra, chorus * 0.7) * 0.6;
     mandadaReverb.gain.value = t.reverb;
     // No "eco só no fim da frase" quem controla a mandada é a mesa, com uma curva.
     if (!t.ecoNoFim) {

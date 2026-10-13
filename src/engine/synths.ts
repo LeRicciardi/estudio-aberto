@@ -1,7 +1,9 @@
 // Sons do beat, todos sintetizados do zero com osciladores e ruído (sem
 // samples): bateria por kit, 808 e instrumentos de melodia.
 
-import type { InstrumentoId, KitId, LaneId } from '../model/project.ts';
+import type { InstrumentoId, KitId, LaneId, Sintetizador } from '../model/project.ts';
+
+export const SINTETIZADOR_PADRAO: Sintetizador = { onda: 'sawtooth', oitava: 0, desafinar: 8, filtro: 2500, ataque: 0.01, soltura: 0.4 };
 
 // ---------- peças básicas ----------
 
@@ -65,6 +67,9 @@ export function saturador(ctx: BaseAudioContext, forca: number): WaveShaperNode 
   }
   const no = ctx.createWaveShaper();
   no.curve = curva;
+  // Distorcer cria frequências acima do que o formato guarda, e elas voltam
+  // como sons que não pertencem à nota. Calcular em 4x a taxa evita isso.
+  no.oversample = '4x';
   return no;
 }
 
@@ -265,10 +270,11 @@ export const INSTRUMENTOS: Record<InstrumentoId, string> = {
   pad: 'Pad (cama de fundo)',
   lead: 'Sintetizador sujo',
   tuin: 'Tuin (agudo do funk)',
+  meu: 'Meu sintetizador',
 };
 
 /** `passo` é a duração de um passo em segundos; notas longas usam isso. */
-export function tocarNota(ctx: BaseAudioContext, destino: AudioNode, inst: InstrumentoId, hz: number, t: number, passo: number) {
+export function tocarNota(ctx: BaseAudioContext, destino: AudioNode, inst: InstrumentoId, hz: number, t: number, passo: number, meu?: Sintetizador) {
   switch (inst) {
     case 'sino': {
       // FM: um oscilador rápido treme a frequência de outro. Com a proporção
@@ -321,6 +327,22 @@ export function tocarNota(ctx: BaseAudioContext, destino: AudioNode, inst: Instr
       const vol = ctx.createGain();
       vol.gain.value = 0.22;
       o.connect(envelope(ctx, t, 0.6, 0.3)).connect(saturador(ctx, 3)).connect(vol).connect(destino);
+      break;
+    }
+    case 'meu': {
+      // Síntese subtrativa: uma onda rica em harmônicos, um filtro que tira
+      // agudos e um envelope que diz como a nota entra e some.
+      const s = meu ?? SINTETIZADOR_PADRAO;
+      const f = hz * 2 ** s.oitava;
+      const dur = s.ataque + s.soltura + 0.05;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.28, t + Math.max(0.003, s.ataque));
+      g.gain.exponentialRampToValueAtTime(0.0005, t + s.ataque + s.soltura);
+      const filtrado = filtro(ctx, 'lowpass', s.filtro, 1.2);
+      filtrado.connect(g).connect(destino);
+      oscilador(ctx, s.onda, f, t, dur).connect(filtrado);
+      if (s.desafinar > 0) oscilador(ctx, s.onda, f * 2 ** (s.desafinar / 1200), t, dur).connect(filtrado);
       break;
     }
     case 'lead': {

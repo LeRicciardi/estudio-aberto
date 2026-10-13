@@ -55,6 +55,7 @@ export const estado = {
   /** Atualizações por quadro (medidores) das páginas de voz e do mixer. */
   quadrosDaVoz: [] as (() => void)[],
   quadrosDoMixer: [] as (() => void)[],
+  quadrosDoMaster: [] as (() => void)[],
   conviteDeInstalacao: undefined as EventoDeInstalacao | undefined,
 };
 estado.historico = [JSON.stringify(estado.projeto)];

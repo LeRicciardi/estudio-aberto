@@ -169,7 +169,7 @@ export function quadro() {
   visorInfo.textContent = `${estado.projeto.bpm} BPM · ${NOTAS[estado.projeto.tom]} ${estado.projeto.escala}`;
   estado.agulhas = estado.agulhas.filter((a) => a.isConnected);
   if (estado.pagina === 'gravar' && !loop) atualizarTeleprompter(pos);
-  for (const fn of estado.pagina === 'efeitos' ? estado.quadrosDaVoz : estado.pagina === 'mixer' ? estado.quadrosDoMixer : []) fn();
+  for (const fn of estado.pagina === 'efeitos' ? estado.quadrosDaVoz : estado.pagina === 'mixer' ? estado.quadrosDoMixer : estado.pagina === 'master' ? estado.quadrosDoMaster : []) fn();
   for (const a of estado.agulhas) a.style.left = `${Math.min(100, (pos / duracao) * 100)}%`;
 
   // Contagem regressiva antes da gravação e nível do microfone durante ela.

@@ -275,3 +275,61 @@ textarea { width: 100%; font: inherit; line-height: 1.7; color: var(--texto); ba
 .passo.forte { background: #ffd08a; border-color: #fff; box-shadow: 0 0 8px rgba(255, 200, 120, 0.8); }
 
 .nome-da-fatia { padding: 2px 6px; font-size: 12px; text-align: left; }
+
+/* ---------- pedaleira ---------- */
+.pedaleira-fundo { padding: 18px 14px; background: repeating-linear-gradient(90deg, #2a211a 0 46px, #241c16 46px 48px), #2a211a; }
+.pedaleira { display: flex; align-items: stretch; gap: 0; width: max-content; }
+.cabo { align-self: center; width: 18px; height: 6px; background: linear-gradient(#444, #111); border-radius: 3px; }
+.pedal {
+  --cor: #8a8f96;
+  display: flex; flex-direction: column; width: 172px; padding: 6px;
+  border-radius: 10px; background: linear-gradient(#c9ced4, #8c9299 55%, #6f757c);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.pedal-face { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px 8px; border-radius: 6px; background: linear-gradient(160deg, color-mix(in srgb, var(--cor) 92%, #fff), color-mix(in srgb, var(--cor) 70%, #000)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45); }
+.pedal-botoes { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 2px; min-height: 84px; }
+.pedal .giratorio { width: 52px; }
+.pedal .giro { width: 34px; height: 34px; background: radial-gradient(circle at 35% 30%, #f6f6f6, #b9b9b9 60%, #6d6d6d); box-shadow: 0 2px 3px rgba(0, 0, 0, 0.6); }
+.pedal .giro i { inset: 3px; }
+.pedal .giro i::after { background: #111; height: 9px; }
+.pedal .giro-valor { color: #10151a; font-weight: 700; font-size: 10px; }
+.pedal .giro-rotulo { color: rgba(0, 0, 0, 0.8); font-size: 10px; font-weight: 600; }
+.pedal-luz { width: 10px; height: 10px; border-radius: 50%; background: #3a1010; border: 1px solid #000; }
+.pedal.ligado .pedal-luz { background: #ff3b30; box-shadow: 0 0 8px 2px rgba(255, 59, 48, 0.8); }
+.pedal-nome { background: none; border: 0; padding: 0; color: #10151a; font-weight: 900; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35); }
+.pedal-nome:hover { text-decoration: underline; }
+.pedal-pe { height: 58px; margin-top: 6px; border: 1px solid #000; border-radius: 6px; background: repeating-linear-gradient(0deg, #1b1d20 0 5px, #2a2d31 5px 7px); box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.08), 0 2px 0 #000; }
+.pedal-pe:active { transform: translateY(2px); box-shadow: none; }
+.pedal:not(.ligado) .pedal-face { filter: saturate(0.35) brightness(0.8); }
+.pedal-limpeza { --cor: #d9c7a3; }
+.pedal-afinacao { --cor: #63b3ff; }
+.pedal-equalizador { --cor: #b8bec6; }
+.pedal-compressor { --cor: #ff6b5e; }
+.pedal-distorcao { --cor: #ff9d2e; }
+.pedal-dobra { --cor: #9bd94a; }
+.pedal-delay { --cor: #3fb58a; }
+.pedal-reverb { --cor: #b48cff; }
+
+/* ---------- master: botão grande e espectro ---------- */
+.giratorio.grande { width: 150px; }
+.giratorio.grande .giro { width: 120px; height: 120px; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), 0 0 0 6px #14181c, 0 0 22px rgba(125, 222, 90, 0.25); background: radial-gradient(circle, #2b3238 0 56%, transparent 57%), conic-gradient(from -135deg, var(--luz) var(--arco, 0deg), #161b1f var(--arco, 0deg) 270deg, transparent 270deg); }
+.giratorio.grande .giro i { inset: 22px; }
+.giratorio.grande .giro i::after { height: 20px; width: 5px; margin-left: -2.5px; }
+.giratorio.grande .giro-valor { font-size: 15px; }
+.giratorio.grande .giro-rotulo { font-size: 13px; }
+.espectro { display: block; width: 100%; height: auto; background: #10161a; border: 1px solid #000; border-radius: 4px; }
+.legenda-espectro { justify-content: space-between; font-size: 11px; color: var(--suave); margin: 2px 0 12px; }
+
+/* ---------- cores do arranjo ---------- */
+.bloco-padrao[data-cor='1'] { background: #3c5a78; border-color: #6c9bc9; }
+.bloco-padrao[data-cor='2'] { background: #6b4a7a; border-color: #a77fbd; }
+.bloco-padrao[data-cor='3'] { background: #7a5a3c; border-color: #c9986c; }
+.bloco-padrao[data-cor='4'] { background: #7a3c50; border-color: #c96c8a; }
+
+/* ---------- teclado na tela ---------- */
+.teclado { display: flex; gap: 3px; margin-bottom: 8px; touch-action: none; user-select: none; }
+.tecla { flex: 1 1 0; min-width: 0; height: 84px; padding: 0 0 8px; display: flex; align-items: flex-end; justify-content: center; border: 1px solid #000; border-radius: 0 0 6px 6px; background: linear-gradient(#fdfdfd, #cfd3d8); color: #1a1f24; font-weight: 700; font-size: 12px; box-shadow: 0 3px 0 #6e757d; }
+.tecla.tonica { background: linear-gradient(#ffe2b8, #ffb961); }
+.tecla:active { transform: translateY(3px); box-shadow: none; }
+
+.curva.automacao { cursor: crosshair; margin-top: 4px; }

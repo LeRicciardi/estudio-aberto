@@ -29,7 +29,19 @@ export const semitonsDoGrau = (grau: number, escala: Escala) => GRAUS[escala][gr
 export const nomeDoGrau = (grau: number, tom: number, escala: Escala) => NOTAS[(tom + semitonsDoGrau(grau, escala)) % 12];
 
 export type KitId = 'trap' | 'boombap' | 'drill' | 'plug' | 'hard' | 'funk' | 'mandelao';
-export type InstrumentoId = 'sino' | 'piano' | 'pluck' | 'pad' | 'lead' | 'tuin';
+export type InstrumentoId = 'sino' | 'piano' | 'pluck' | 'pad' | 'lead' | 'tuin' | 'meu';
+
+/** O sintetizador montado pela pessoa: forma de onda, oitava, filtro e envelope. */
+export interface Sintetizador {
+  onda: 'sine' | 'triangle' | 'sawtooth' | 'square';
+  oitava: number;
+  /** Segunda onda levemente desafinada, em cents (0 = uma onda só). */
+  desafinar: number;
+  /** Frequência do filtro que tira agudos, em Hz. */
+  filtro: number;
+  ataque: number;
+  soltura: number;
+}
 export type Virada = 'nenhuma' | 'subida' | 'crash' | 'silencio';
 export type PresetVoz = 'cru' | 'rap' | 'boombap' | 'trap' | 'plug' | 'rnb' | 'drill' | 'hard' | 'funk';
 export type PresetMaster = 'desligado' | 'limpo' | 'alto';
@@ -107,12 +119,16 @@ export interface Take {
   comp: { limiar: number; razao: number; ataque: number; soltura: number; ganho: number; dupla?: boolean; paralela?: number };
   /** Dobra estéreo: cópias levemente atrasadas da voz, uma de cada lado (0 a 1). */
   dobra: number;
+  /** Chorus: o quanto as cópias da dobra ondulam (0 = paradas, 1 = bem onduladas). */
+  chorus?: number;
   /** Limpeza: `gate` é o limiar em dB abaixo do qual o som é abafado (0 = desligado); `deEsser` vai de 0 a 1. */
   limpeza: { gate: number; deEsser: number; ruido?: number; nivelar?: number };
   /** Eco só no fim das frases, em vez de o tempo todo. */
   ecoNoFim?: boolean;
   /** Harmonia automática: uma segunda voz, alguns graus da escala acima ou abaixo. */
   harmonia?: { quanto: number; graus: number };
+  /** Pedais desligados com o pé: o ajuste fica guardado, mas o efeito não soa. */
+  desligados?: Partial<Record<Pedal, boolean>>;
   /** Edição: segundos aparados do começo e do fim, fades e ganho da gravação em dB. */
   edicao: { ini: number; fim: number; fadeIn: number; fadeOut: number; ganhoDb: number };
 }
@@ -126,6 +142,45 @@ export interface AjusteDoSom {
   altura: number;
 }
 
+/** Os aparelhos da cadeia de voz, na ordem em que o som passa por eles. */
+export const PEDAIS = ['limpeza', 'afinacao', 'equalizador', 'compressor', 'distorcao', 'dobra', 'delay', 'reverb'] as const;
+export type Pedal = (typeof PEDAIS)[number];
+
+/**
+ * O take como ele deve soar: os pedais desligados viram ajustes neutros.
+ * Assim desligar um pedal não apaga o que estava regulado nele.
+ */
+export function comPedais(take: Take): Take {
+  const d = take.desligados;
+  if (!d || !Object.values(d).some(Boolean)) return take;
+  const t = { ...take };
+  if (d.limpeza) t.limpeza = { gate: 0, deEsser: 0, ruido: 0, nivelar: 0 };
+  if (d.afinacao) {
+    t.tune = { ...t.tune, ligado: false };
+    t.altura = 0;
+  }
+  if (d.equalizador) t.eq = { ...t.eq, corte: 20, graveDb: 0, medioDb: 0, arDb: 0 };
+  if (d.compressor) t.comp = { ...t.comp, limiar: 0, razao: 1, ganho: 0, dupla: false, paralela: 0 };
+  if (d.distorcao) {
+    t.distorcao = 0;
+    t.telefone = false;
+  }
+  if (d.dobra) {
+    t.dobra = 0;
+    t.chorus = 0;
+    t.harmonia = { graus: t.harmonia?.graus ?? 2, quanto: 0 };
+  }
+  if (d.delay) {
+    t.delay = 0;
+    t.ecoNoFim = false;
+  }
+  if (d.reverb) t.reverb = 0;
+  return t;
+}
+
+/** O projeto com os pedais desligados aplicados a cada take. */
+export const comPedaisNoProjeto = (p: Project): Project => (p.takes.some((t) => t.desligados) ? { ...p, takes: p.takes.map(comPedais) } : p);
+
 /** Ajustes do master além do acabamento escolhido. */
 export interface AjusteDoMaster {
   graveDb: number;
@@ -135,6 +190,8 @@ export interface AjusteDoMaster {
   largura: number;
   /** Limitador suave: arredonda os picos para ganhar volume (0 a 1). */
   clipper?: number;
+  /** Compressor multibanda: comprime grave, médio e agudo separadamente (0 a 1). */
+  multibanda?: number;
   /** Volume-alvo da exportação em LUFS; null = não ajustar. */
   alvoLufs: number | null;
 }
@@ -197,6 +254,17 @@ export interface Project {
   ajusteDoMaster: AjusteDoMaster;
   /** Letra: cada linha vale um compasso, a partir de `compasso` (o primeiro é 1). */
   letra: { texto: string; compasso: number };
+  /** Sintetizador próprio, usado quando o instrumento da melodia é "meu". */
+  sintetizador?: Sintetizador;
+  /**
+   * Automação de volume: para o beat ('beat') ou para um take (o id dele),
+   * pontos [tempo em segundos, volume] ligados por retas.
+   */
+  automacao?: Record<string, [number, number][]>;
+  /** Solo: ouvir só o beat ('beat') ou só um take (o id dele). Não afeta a exportação. */
+  solo?: string;
+  /** Música de referência para comparar na página Master. */
+  referencia?: { audioId: string; nome: string; lufs: number };
   /** Dados para lançar a música e ficha do beat usado. */
   lancamento?: Lancamento;
 }
@@ -308,7 +376,7 @@ export function normalizar(p: Project): Project {
 
 /** Todo áudio que o projeto usa: beat importado, samples e takes. */
 export function idsDeAudio(p: Project): string[] {
-  const ids = [p.beat.audioId, p.sample808?.audioId, p.sampler?.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
+  const ids = [p.beat.audioId, p.sample808?.audioId, p.sampler?.audioId, p.referencia?.audioId, ...Object.values(p.samples).map((s) => s.audioId), ...p.takes.map((t) => t.audioId)];
   return ids.filter((a): a is string => !!a);
 }
 

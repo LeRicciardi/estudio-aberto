@@ -5,18 +5,20 @@ import { exportarMix, paraWav } from '../engine/engine.ts';
 import { processarEmSegundoPlano } from '../engine/tuneClient.ts';
 import { PRESETS_VOZ, aplicarTimbre } from '../engine/vocalChain.ts';
 import { afinadoCom, av, engine, estado, mudou, projetoParaTocar, so } from '../estado.ts';
-import { NOTAS, type PresetVoz, type Project, type Take, usaProcessamento, usaTune } from '../model/project.ts';
+import { NOTAS, type PresetVoz, type Project, type Take, usaProcessamento, usaTune, comPedais } from '../model/project.ts';
 import { avisar, secVozes } from '../moldura.ts';
-import { reiniciarSeTocando } from '../transporte.ts';
+import { reiniciarSeTocando, trocarTela } from '../transporte.ts';
 import { baixar, botao, campo, deslizante, explicacao, h, opcoes, seletor } from '../ui/controles.ts';
-import { TELAS, telaDeEfeito } from '../ui/efeitos.ts';
+import { TELAS, pedaleira, telaDeEfeito } from '../ui/efeitos.ts';
 import { desenharGravar } from './gravar.ts';
 import { desenharMixer } from './mixer.ts';
 import { montagem } from './montagem.ts';
 import { onda } from './onda.ts';
 
 /** Refaz o processamento prévio de um take: limpeza (gate, de-esser) e afinação. */
-export async function reafinar(take: Take) {
+export async function reafinar(original_: Take) {
+  // Pedais desligados contam como efeito neutro também no processamento prévio.
+  const take = comPedais(original_);
   const chave = take.audioId + ':tune';
   const original = engine.buffers.get(take.audioId);
   if ((!usaProcessamento(take) && !take.harmonia?.quanto) || !original) return;
@@ -125,6 +127,38 @@ async function exportarVinheta(take: Take) {
   avisar('Vinheta exportada em duas versões: seca, para tratar depois, e com efeito, pronta para usar.');
 }
 
+const CHAVE_DOS_PRESETS = 'estudio-aberto:presets';
+/** O que um preset guarda: todos os ajustes de som, sem o áudio nem a posição do take. */
+const CAMPOS_DO_PRESET = ['preset', 'tune', 'altura', 'reverb', 'tamanhoReverb', 'delay', 'divisaoDelay', 'repeticoes', 'distorcao', 'telefone', 'eq', 'comp', 'dobra', 'chorus', 'limpeza', 'ecoNoFim', 'harmonia', 'desligados'] as const;
+
+const lerPresets = (): Record<string, Partial<Take>> => JSON.parse(localStorage.getItem(CHAVE_DOS_PRESETS) ?? '{}');
+
+/** Presets da pessoa: guardar a cadeia de efeitos de um take e aplicar em outros takes e outras músicas. */
+function presets(take: Take): HTMLElement {
+  const guardados = lerPresets();
+  const nomes = Object.keys(guardados);
+  return h('div', { className: 'linha' },
+    nomes.length
+      ? seletor('Meus presets', [['', 'Aplicar um preset...'] as [string, string], ...nomes.map((n) => [n, n] as [string, string])], '', (nome) => {
+          if (!guardados[nome]) return;
+          Object.assign(take, structuredClone(guardados[nome]));
+          desenharVozes();
+          void reafinar(take);
+          avisar(`Preset "${nome}" aplicado em ${take.nome}.`);
+        })
+      : '',
+    botao('Guardar como preset', () => {
+      const nome = prompt('Nome do preset (ex.: Minha voz no trap):')?.trim();
+      if (!nome) return;
+      const preset: Record<string, unknown> = {};
+      for (const campo of CAMPOS_DO_PRESET) if (take[campo] !== undefined) preset[campo] = structuredClone(take[campo]);
+      localStorage.setItem(CHAVE_DOS_PRESETS, JSON.stringify({ ...guardados, [nome]: preset }));
+      desenharVozes();
+      avisar(`Preset "${nome}" guardado. Ele fica disponível em todas as músicas neste navegador.`);
+    }),
+  );
+}
+
 export function desenharVozes() {
   estado.quadrosDaVoz = [];
   desenharMixer();
@@ -206,6 +240,7 @@ export function desenharVozes() {
     onda(take),
     h('div', { className: 'linha' }, comparar, botao('Conferir equilíbrio voz × beat', () => void conferirEquilibrio())),
     h('div', { className: 'linha' },
+      presets(take),
       Object.assign(botao('Ajustar ao meu take', () => ajustarAoTake(take), 'principal'), { title: 'Mede esta gravação e regula equalizador, compressor e limpeza para ela' }),
       botao('Principal', () => definirPapel(take, 'principal')),
       botao('Dobra', () => definirPapel(take, 'dobra')),
@@ -228,6 +263,14 @@ export function desenharVozes() {
     ])),
 
     // Tela completa: uma tela por ferramenta.
+    h('h3', {}, 'Cadeia de efeitos'),
+    h('p', { className: 'nota' }, 'A voz passa pelos pedais da esquerda para a direita. Gire os botões, pise na chave de baixo para ligar e desligar, e toque no nome do pedal para o ajuste fino.'),
+    pedaleira(take, contexto, (tela) => {
+      estado.telaAberta = tela;
+      if (estado.telaSimples) trocarTela();
+      else desenharVozes();
+      document.querySelector('.abas.telas')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }),
     av(h('div', { className: 'abas telas' }, ...TELAS.map((t) => botao(t, () => {
       estado.telaAberta = t;
       desenharVozes();

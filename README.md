@@ -37,15 +37,15 @@ A tela é organizada como uma estação de trabalho: barra de transporte no topo
 |---|---|
 | Estilo | Cartões de gênero com prévia: boombap, trap, plug, love song, drill, hard/trash, funk, mandelão, bruxaria. Cada um traz andamento, balanço, kit, timbre de voz e padrão de partida |
 | Beat | Grade de bateria em 16 passos com rolos e notas fracas, 7 kits sintetizados, 20 samples prontos ou samples próprios; três volumes por nota e ajuste de volume, lado e balanço por som; ou importação de um beat pronto, com sugestão de BPM e tom |
-| Notas | Sampler (loop cortado em fatias que a grade dispara), 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com 5 instrumentos, tudo preso à escala da música |
-| Arranjo | Linha do tempo com os padrões em sequência e a forma de onda de cada voz; trechos com nome, partes mudas e virada; estrutura de música pronta |
+| Notas | Sampler (loop cortado em fatias que a grade dispara), 808 em grade de notas com deslize (sintetizado ou por sample próprio afinado) e melodia com instrumentos prontos ou um sintetizador próprio (onda, filtro, envelope), teclado na tela, acordes e arpejo, tudo preso à escala da música |
+| Arranjo | Linha do tempo com os padrões em sequência e a forma de onda de cada voz; trechos com nome, partes mudas e virada; estrutura de música pronta; automação de volume desenhada para o beat e para cada voz |
 | Letra | Letra presa aos compassos do beat (uma linha por compasso), com sílabas aproximadas; aparece na tela e acompanha a música ao gravar |
 | Gravar | Gravação em laço (cada volta vira um take), teste do lugar de gravação (ruído e eco), importação de voz já gravada (WhatsApp, gravador), gravação em PCM sem compressão, contagem de 4, medidor e escolha do microfone, regravar um trecho, medição do atraso do aparelho, aviso de voz estourada ou baixa |
-| Voz | Uma tela por ferramenta, com botões giratórios: afinação (tune), equalizador com curva, compressor com medidor de redução, espaço (reverb, delay, dobra estéreo), caráter (timbre, distorção, telefone), limpeza (redução de ruído, gate, nivelamento por frase e de-esser) e edição (aparar, fades, ganho). "Ajustar ao meu take" mede a gravação e regula tudo; há compressão dupla e paralela, harmonia automática, eco só no fim da frase e papéis de principal, dobra e adlib. Montagem do melhor de cada take, comparação com e sem efeitos e conferência do equilíbrio com o beat |
-| Mixer | Uma faixa por canal (bateria, 808, melodia, beat, cada voz, master) com medidor, volume, lado e mudo. O beat abre espaço sozinho quando a voz entra |
-| Master | Acabamento (compressor de cola, ganho, limitador), equalizador de 3 bandas, largura do estéreo, volume final em LUFS; diagnóstico da mix, que mede, explica e corrige; escuta em mono e em caixa de celular; exportação em WAV, MP3, acapella e instrumental, com BPM e tom no nome do arquivo |
+| Voz | Pedaleira em que cada efeito é um pedal com chave de pé, e uma tela por ferramenta, com botões giratórios: afinação (tune), equalizador com curva, compressor com medidor de redução, espaço (reverb, delay, dobra estéreo, chorus), caráter (timbre, distorção, telefone), limpeza (redução de ruído, gate, nivelamento por frase e de-esser) e edição (aparar, fades, ganho). "Ajustar ao meu take" mede a gravação e regula tudo; há compressão dupla e paralela, harmonia automática, eco só no fim da frase e papéis de principal, dobra e adlib; presets próprios da cadeia. Montagem do melhor de cada take, comparação com e sem efeitos e conferência do equilíbrio com o beat |
+| Mixer | Uma faixa por canal (bateria, 808, melodia, beat, cada voz, master) com medidor, volume, lado, mudo e solo. O beat abre espaço sozinho quando a voz entra |
+| Master | Botão grande de volume final, analisador de espectro ao vivo, acabamento (compressor de cola, multibanda, ganho, limitador de pico real), equalizador de 3 bandas, largura do estéreo, volume final em LUFS; diagnóstico da mix, que mede, explica e corrige; escuta em mono e em caixa de celular; exportação em WAV, MP3, acapella e instrumental, com BPM e tom no nome do arquivo |
 | Lançar | Dados da música, ficha da licença do beat, conferência do áudio e da capa, pacote .zip com WAV, MP3 com etiquetas, acapella, instrumental, versão para DJ, versão limpa, versão em outro andamento e faixas separadas; vídeo vertical para divulgar |
-| Projeto | Enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
+| Projeto | Recuperação de gravação interrompida, espaço usado, diagnóstico para copiar; enviar o projeto e juntar as vozes de um parceiro; salvamento automático, versões guardadas, arquivo único com projeto e áudio, instalação como aplicativo, atalhos |
 
 A **tela simples** mostra só Estilo, Beat, Letra, Gravar, Voz, Master, Lançar e Projeto, com controles por intenção (afinação em 4 níveis, perto ↔ longe, seca ↔ com eco). "Mostrar tudo" abre as demais páginas e as telas de cada ferramenta.
 
@@ -142,6 +142,7 @@ Para acrescentar ou corrigir um gênero, edite `src/model/generos.ts`: cada mode
 - O diagnóstico da mix usa limiares fixos, calibrados com sinais sintéticos; ainda não foi comparado com mixes reais.
 - A contagem de sílabas da letra é aproximada (grupos de vogais), não uma escansão poética.
 - A montagem de takes corta em limites de compasso (1, 2 ou 4); não há corte livre dentro do take.
+- O compressor é o do navegador, que compensa o ganho sozinho; não há mandadas e retornos, e a automação cobre só o volume. A lista do que separa o estúdio de um programa profissional está em `docs/roteiro.md`.
 - Não há colaboração em nuvem; a troca é pelo arquivo de projeto.
 - Não foi testado em iPhone nem em Android de entrada. Os riscos conhecidos estão em `docs/pesquisa.md`.
 

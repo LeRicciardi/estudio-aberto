@@ -6,7 +6,7 @@ import { aplicarTimbre } from '../engine/vocalChain.ts';
 import { av, avisosDeTake, engine, estado, gravador, id, mudou, prefs, projetoParaTocar, relogio } from '../estado.ts';
 import { type Take, novoTake } from '../model/project.ts';
 import { avisar, botaoGravar, botaoTocar, contagemEl, medidorDeEntrada, secGravar } from '../moldura.ts';
-import { guardarAudio } from '../storage.ts';
+import { abrirCofre, fecharCofre, guardarAudio, guardarNoCofre, recuperarDoCofre } from '../storage.ts';
 import { desenharTransporte, parar, tocar, trocarModo } from '../transporte.ts';
 import { botao, campo, explicacao, h, seletor } from '../ui/controles.ts';
 import { teleprompter } from './letra.ts';
@@ -84,6 +84,28 @@ async function terminarLaco(g: { amostras: Float32Array; taxa: number; inicio: n
   }
 }
 
+let cofre = 0;
+let trava: WakeLockSentinel | undefined;
+
+/** Ao abrir o estúdio: se uma gravação foi interrompida por uma queda, ela volta como take. */
+export async function recuperarGravacao() {
+  const r = await recuperarDoCofre();
+  if (r) {
+    const take = novoTake(id(), 'Take recuperado', id(), r.inicio, estado.projeto.voz);
+    aplicarTimbre(take, take.preset);
+    const buffer = engine.ctx.createBuffer(1, r.amostras.length, r.taxa);
+    buffer.copyToChannel(r.amostras, 0);
+    engine.buffers.set(take.audioId, buffer);
+    estado.projeto.takes.push(take);
+    mudou();
+    await guardarAudio(take.audioId, { tipo: 'pcm', taxa: r.taxa, amostras: r.amostras });
+    desenharVozes();
+    void desenharGravar();
+    avisar('Uma gravação tinha sido interrompida e foi recuperada como "Take recuperado". Confira o alinhamento com o beat.');
+  }
+  await fecharCofre();
+}
+
 export async function alternarGravacao(refazer?: Take) {
   if (estado.gravando) return terminarGravacao();
   parar();
@@ -91,7 +113,9 @@ export async function alternarGravacao(refazer?: Take) {
     estado.modo = 'musica';
     desenharTransporte();
   }
-  if (refazer) estado.cursor = Math.max(0, refazer.inicio);
+  // Regravação: volta um compasso antes do trecho, para a pessoa ouvir o que
+  // vem antes, pegar o tom e a energia e entrar cantando no ponto.
+  if (refazer) estado.cursor = Math.max(0, refazer.inicio - (4 * 60) / estado.projeto.bpm);
   try {
     await engine.ctx.resume();
     await gravador.iniciar(prefs.microfone || undefined);
@@ -101,6 +125,11 @@ export async function alternarGravacao(refazer?: Take) {
   }
   estado.regravando = refazer;
   marcarGravacao(true);
+  // Cofre: a gravação é guardada a cada 3 segundos, para sobreviver a uma queda.
+  abrirCofre(engine.ctx.sampleRate, estado.cursor);
+  cofre = window.setInterval(() => void guardarNoCofre(gravador.novos()), 3000);
+  // Mantém a tela acesa: tela apagada pode cortar o microfone no celular.
+  trava = await navigator.wakeLock?.request('screen').catch(() => undefined);
   avisar('Gravando. Use fone de ouvido, senão o beat vaza para o microfone.');
   // Contagem: um compasso de estalos para a pessoa entrar no tempo.
   const espera = prefs.contagem ? engine.contar(estado.projeto.bpm) : 0;
@@ -114,7 +143,10 @@ botaoGravar.onclick = () => void alternarGravacao();
 export const botaoGravarGrande = h('button', { className: 'gravar grande', onclick: () => void alternarGravacao() }, '● Gravar voz');
 
 export async function terminarGravacao() {
+  window.clearInterval(cofre);
+  void trava?.release();
   const g = gravador.parar();
+  void fecharCofre();
   const { t0, desde } = engine;
   const antigo = estado.regravando;
   estado.regravando = undefined;

@@ -2,8 +2,8 @@
 // aparelho com botões giratórios: afinação, equalizador, compressor, espaço,
 // caráter, limpeza e edição.
 import { PRESETS_VOZ, TAMANHOS_DE_REVERB, aplicarTimbre, curvaDoEq } from '../engine/vocalChain.ts';
-import { type DivisaoDelay, NOTAS, type PresetVoz, type Project, type Take, type TamanhoReverb } from '../model/project.ts';
-import { botao, chave, explicacao, giratorio, h, numero, opcoes, seletor } from './controles.ts';
+import { type DivisaoDelay, NOTAS, PEDAIS, type Pedal, type PresetVoz, type Project, type Take, type TamanhoReverb } from '../model/project.ts';
+import { botao, chave, explicacao, giratorio, h, mudancaFeita, numero, opcoes, seletor } from './controles.ts';
 
 import type { Engine } from '../engine/engine.ts';
 
@@ -96,18 +96,81 @@ function equalizador(take: Take, c: Contexto): HTMLElement {
     g.stroke();
   };
   desenhar();
+
+  // Pontos arrastáveis sobre a curva: cada um é uma banda do equalizador.
+  const hzParaX = (f: number) => (Math.log(f / 20) / Math.log(1000)) * tela.width;
+  const dbParaY = (ganho: number) => tela.height / 2 - (ganho / 18) * (tela.height / 2);
+  const pontos = () => [
+    { nome: 'corte', x: hzParaX(Math.max(20, take.eq.corte)), y: dbParaY(0), cor: '#6cb6ff' },
+    { nome: 'corpo', x: hzParaX(200), y: dbParaY(take.eq.graveDb), cor: '#7dde5a' },
+    { nome: 'presenca', x: hzParaX(take.eq.medioHz), y: dbParaY(take.eq.medioDb), cor: '#ff9d2e' },
+    { nome: 'ar', x: hzParaX(9000), y: dbParaY(take.eq.arDb), cor: '#ff6b9d' },
+  ];
+  const desenharPontos = () => {
+    const g = tela.getContext('2d');
+    if (!g) return;
+    for (const p of pontos()) {
+      g.beginPath();
+      g.arc(p.x, p.y, 9, 0, 2 * Math.PI);
+      g.fillStyle = p.cor;
+      g.fill();
+      g.lineWidth = 2;
+      g.strokeStyle = '#ffffff';
+      g.stroke();
+    }
+  };
+  const redesenhar = () => {
+    desenhar();
+    desenharPontos();
+  };
+  desenharPontos();
+  let preso: string | null = null;
+  const naTela = (e: PointerEvent) => {
+    const r = tela.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * tela.width, y: ((e.clientY - r.top) / r.height) * tela.height };
+  };
+  tela.style.touchAction = 'none';
+  tela.onpointerdown = (e) => {
+    const m = naTela(e);
+    const perto = pontos().map((p) => ({ p, d: Math.hypot(p.x - m.x, p.y - m.y) })).sort((a, b) => a.d - b.d)[0];
+    if (perto.d > 40) return;
+    preso = perto.p.nome;
+    tela.setPointerCapture(e.pointerId);
+  };
+  tela.onpointermove = (e) => {
+    if (!preso) return;
+    const m = naTela(e);
+    const f = 20 * 1000 ** Math.min(1, Math.max(0, m.x / tela.width));
+    const ganho = Math.min(12, Math.max(-12, ((tela.height / 2 - m.y) / (tela.height / 2)) * 18));
+    if (preso === 'corte') take.eq.corte = Math.min(400, Math.max(20, f));
+    if (preso === 'corpo') take.eq.graveDb = ganho;
+    if (preso === 'ar') take.eq.arDb = ganho;
+    if (preso === 'presenca') {
+      take.eq.medioHz = Math.min(8000, Math.max(300, f));
+      take.eq.medioDb = ganho;
+    }
+    redesenhar();
+    mudancaFeita(true);
+  };
+  tela.onpointerup = tela.onpointercancel = () => {
+    if (!preso) return;
+    preso = null;
+    // Redesenha a tela para os botões giratórios mostrarem os novos valores.
+    c.redesenhar();
+  };
   const banda = (rotulo: string, chaveDaBanda: 'graveDb' | 'medioDb' | 'arDb') =>
-    giratorio({ rotulo, min: -12, max: 12, valor: take.eq[chaveDaBanda], padrao: 0, formato: db, aoMudar: (v) => { take.eq[chaveDaBanda] = v; desenhar(); } });
+    giratorio({ rotulo, min: -12, max: 12, valor: take.eq[chaveDaBanda], padrao: 0, formato: db, aoMudar: (v) => { take.eq[chaveDaBanda] = v; redesenhar(); } });
   return aparelho('Equalizador',
     tela,
     fileira(
-      giratorio({ rotulo: 'Corte de graves', min: 20, max: 400, log: true, valor: Math.max(20, take.eq.corte), padrao: 90, formato: hz, aoMudar: (v) => { take.eq.corte = v; desenhar(); } }),
+      giratorio({ rotulo: 'Corte de graves', min: 20, max: 400, log: true, valor: Math.max(20, take.eq.corte), padrao: 90, formato: hz, aoMudar: (v) => { take.eq.corte = v; redesenhar(); } }),
       banda('Corpo (200 Hz)', 'graveDb'),
-      giratorio({ rotulo: 'Presença: onde', min: 300, max: 8000, log: true, valor: take.eq.medioHz, padrao: 3500, formato: hz, aoMudar: (v) => { take.eq.medioHz = v; desenhar(); } }),
+      giratorio({ rotulo: 'Presença: onde', min: 300, max: 8000, log: true, valor: take.eq.medioHz, padrao: 3500, formato: hz, aoMudar: (v) => { take.eq.medioHz = v; redesenhar(); } }),
       banda('Presença: quanto', 'medioDb'),
       banda('Ar (9 kHz)', 'arDb'),
     ),
     explicacao([
+      'Arraste os pontos coloridos sobre a curva: azul é o corte de graves, verde o corpo, laranja a presença (anda para os lados e para cima) e rosa o ar.',
       'O equalizador aumenta ou diminui faixas de grave, médio e agudo. A curva mostra o resultado: acima da linha do meio está reforçando, abaixo está cortando.',
       'Corte de graves: remove tudo abaixo da frequência escolhida. Tira ronco e batida de microfone, que brigam com o 808.',
       'Corpo: o peso da voz. Demais deixa abafada; de menos, fina.',
@@ -173,6 +236,7 @@ function espaco(take: Take, c: Contexto): HTMLElement {
         c.redesenhar();
       }),
       giratorio({ rotulo: 'Dobra estéreo', min: 0, max: 1, valor: take.dobra, padrao: 0, formato: pct, aoMudar: (v) => { take.dobra = v; } }),
+      giratorio({ rotulo: 'Chorus', min: 0, max: 1, valor: take.chorus ?? 0, padrao: 0, formato: pct, aoMudar: (v) => { take.chorus = v; } }),
     ),
     fileira(
       giratorio({ rotulo: 'Harmonia', min: 0, max: 1, valor: take.harmonia?.quanto ?? 0, padrao: 0, formato: (v) => (v === 0 ? 'Desligada' : pct(v)), aoMudar: (v) => { take.harmonia = { graus: take.harmonia?.graus ?? 2, quanto: v }; }, aoSoltar: () => c.reprocessar(take) }),
@@ -186,6 +250,7 @@ function espaco(take: Take, c: Contexto): HTMLElement {
       'Delay repete a voz em eco, no tempo do beat. "Repetições" define quantas vezes o eco volta antes de sumir.',
       'Eco só no fim da frase: o delay fica fechado e abre apenas na última palavra de cada frase, que ecoa no espaço seguinte. É uma assinatura do trap; o botão Delay define a força.',
       'Harmonia cria uma segunda voz a partir da sua, cantando outras notas da mesma escala. Uma terça acima, baixinha, enche um refrão.',
+      'Chorus faz as cópias da dobra ondularem: a afinação delas sobe e desce de leve, e a soma soa como várias vozes juntas. Pouco engorda; muito dá o efeito aquático dos anos 80.',
       'Dobra estéreo cria duas cópias levemente atrasadas da voz, uma de cada lado. A voz fica larga, como se tivesse sido gravada mais de uma vez. Boa em refrões.',
     ]),
   );
@@ -268,6 +333,107 @@ function edicao(take: Take, c: Contexto): HTMLElement {
       'Ganho da gravação: corrige uma gravação que ficou baixa ou alta, antes de qualquer efeito. É diferente do volume no mixer, que vem depois.',
     ]),
   );
+}
+
+// ---------- pedaleira ----------
+// A cadeia de voz desenhada como uma fila de pedais, na ordem em que o som
+// passa por eles. Cada pedal tem os botões principais, uma luz de ligado e
+// uma chave de pé; o ajuste fino fica na tela do aparelho.
+
+const mini = (rotulo: string, min: number, max: number, valor: number, aoMudar: (v: number) => void, formato: (v: number) => string = pct, aoSoltar?: () => void, passo?: number) =>
+  giratorio({ rotulo, min, max, valor, formato, aoMudar, aoSoltar, passo });
+
+interface DesenhoDoPedal {
+  nome: string;
+  tela: Tela;
+  botoes: (take: Take, c: Contexto) => HTMLElement[];
+}
+
+const DESENHO: Record<Pedal, DesenhoDoPedal> = {
+  limpeza: {
+    nome: 'Limpeza', tela: 'Limpeza',
+    botoes: (t, c) => [
+      mini('Ruído', 0, 1, t.limpeza.ruido ?? 0, (v) => { t.limpeza.ruido = v; }, pct, () => c.reprocessar(t)),
+      // Gate em um botão só: zero é desligado; girar sobe o limiar de -70 até -20 dB.
+      mini('Gate', 0, 1, t.limpeza.gate < 0 ? (t.limpeza.gate + 70) / 50 : 0, (v) => { t.limpeza.gate = v < 0.02 ? 0 : -70 + v * 50; }, (v) => (v < 0.02 ? 'Off' : `${Math.round(-70 + v * 50)}`), () => c.reprocessar(t)),
+      mini('De-esser', 0, 1, t.limpeza.deEsser, (v) => { t.limpeza.deEsser = v; }, pct, () => c.reprocessar(t)),
+    ],
+  },
+  afinacao: {
+    nome: 'Tune', tela: 'Afinação',
+    botoes: (t, c) => [
+      mini('Veloc.', 0, 1, t.tune.velocidade, (v) => { t.tune.velocidade = v; }, (v) => (v < 0.05 ? 'Robô' : pct(v)), () => c.reprocessar(t)),
+      mini('Correção', 0, 1, t.tune.intensidade, (v) => { t.tune.intensidade = v; }, pct, () => c.reprocessar(t)),
+      mini('Altura', -12, 12, t.altura, (v) => { t.altura = v; }, (v) => `${v > 0 ? '+' : ''}${v}`, () => c.reprocessar(t), 1),
+    ],
+  },
+  equalizador: {
+    nome: 'EQ', tela: 'Equalizador',
+    botoes: (t) => [
+      mini('Corpo', -12, 12, t.eq.graveDb, (v) => { t.eq.graveDb = v; }, (v) => v.toFixed(0)),
+      mini('Presença', -12, 12, t.eq.medioDb, (v) => { t.eq.medioDb = v; }, (v) => v.toFixed(0)),
+      mini('Ar', -12, 12, t.eq.arDb, (v) => { t.eq.arDb = v; }, (v) => v.toFixed(0)),
+    ],
+  },
+  compressor: {
+    nome: 'Compressor', tela: 'Compressor',
+    botoes: (t) => [
+      mini('Limiar', -60, 0, t.comp.limiar, (v) => { t.comp.limiar = v; }, (v) => v.toFixed(0)),
+      mini('Razão', 1, 20, t.comp.razao, (v) => { t.comp.razao = v; }, (v) => `${v.toFixed(1)}:1`),
+      mini('Ganho', 0, 18, t.comp.ganho, (v) => { t.comp.ganho = v; }, (v) => `+${v.toFixed(0)}`),
+    ],
+  },
+  distorcao: {
+    nome: 'Distorção', tela: 'Caráter',
+    botoes: (t) => [mini('Sujeira', 0, 1, t.distorcao, (v) => { t.distorcao = v; })],
+  },
+  dobra: {
+    nome: 'Dobra', tela: 'Espaço',
+    botoes: (t, c) => [
+      mini('Largura', 0, 1, t.dobra, (v) => { t.dobra = v; }),
+      mini('Chorus', 0, 1, t.chorus ?? 0, (v) => { t.chorus = v; }),
+      mini('Harmonia', 0, 1, t.harmonia?.quanto ?? 0, (v) => { t.harmonia = { graus: t.harmonia?.graus ?? 2, quanto: v }; }, pct, () => c.reprocessar(t)),
+    ],
+  },
+  delay: {
+    nome: 'Delay', tela: 'Espaço',
+    botoes: (t) => [
+      mini('Eco', 0, 0.8, t.delay, (v) => { t.delay = v; }),
+      mini('Repete', 0, 0.75, t.repeticoes, (v) => { t.repeticoes = v; }),
+    ],
+  },
+  reverb: {
+    nome: 'Reverb', tela: 'Espaço',
+    botoes: (t) => [
+      mini('Quanto', 0, 0.8, t.reverb, (v) => { t.reverb = v; }),
+      mini('Sala', 0, 2, ['quarto', 'sala', 'salao'].indexOf(t.tamanhoReverb), (v) => { t.tamanhoReverb = (['quarto', 'sala', 'salao'] as const)[Math.round(v)]; }, (v) => ['Quarto', 'Sala', 'Salão'][Math.round(v)], undefined, 1),
+    ],
+  },
+};
+
+/** A fila de pedais de um take. `abrir` mostra a tela de ajuste fino do pedal clicado. */
+export function pedaleira(take: Take, c: Contexto, abrir: (tela: Tela) => void): HTMLElement {
+  const fila = h('div', { className: 'pedaleira' });
+  PEDAIS.forEach((id, i) => {
+    const d = DESENHO[id];
+    const ligado = !take.desligados?.[id] && (id !== 'afinacao' || take.tune.ligado || take.altura !== 0);
+    const pe = h('button', { className: 'pedal-pe', ariaPressed: String(ligado), ariaLabel: `${ligado ? 'Desligar' : 'Ligar'} ${d.nome}`, title: 'Pisar: liga e desliga' });
+    pe.onclick = () => {
+      // O pedal de tune liga a própria afinação; os outros só deixam de soar, guardando o ajuste.
+      if (id === 'afinacao' && !take.tune.ligado && take.altura === 0) take.tune.ligado = true;
+      else take.desligados = { ...take.desligados, [id]: ligado };
+      c.reprocessar(take);
+      c.redesenhar();
+    };
+    const nome = h('button', { className: 'pedal-nome', title: 'Abrir o ajuste fino' }, d.nome);
+    nome.onclick = () => abrir(d.tela);
+    if (i) fila.append(h('i', { className: 'cabo' }));
+    fila.append(h('div', { className: `pedal pedal-${id}${ligado ? ' ligado' : ''}` },
+      h('div', { className: 'pedal-face' }, h('div', { className: 'pedal-botoes' }, ...d.botoes(take, c)), h('i', { className: 'pedal-luz' }), nome),
+      pe,
+    ));
+  });
+  return h('div', { className: 'rolagem pedaleira-fundo' }, fila);
 }
 
 /** A tela de efeito escolhida para um take. */

@@ -17,17 +17,23 @@ function aoTocar(nota: number) {
   const grauNaOitava = BRANCAS.indexOf(nota % 12);
   if (grauNaOitava < 0) return;
   const oitava = Math.floor(nota / 12) - 1;
-  const p = estado.projeto;
   // Abaixo do Dó central (oitava 4) toca o 808; dali para cima, a melodia.
-  const baixo = oitava < 4;
-  const grau = Math.min(LINHAS - 1, grauNaOitava + (oitava > 4 ? 7 : 0));
+  tocarGrau(Math.min(LINHAS - 1, grauNaOitava + (oitava > 4 ? 7 : 0)), oitava < 4);
+}
+
+/**
+ * Toca uma nota da escala (pelo grau) no 808 ou na melodia. Com o padrão em
+ * repetição, a nota também é escrita na grade, no passo mais próximo.
+ * Serve ao teclado MIDI e ao teclado desenhado na tela.
+ */
+export function tocarGrau(grau: number, baixo: boolean) {
+  const p = estado.projeto;
   const semitons = p.tom + semitonsDoGrau(grau, p.escala);
   const agora = engine.ctx.currentTime + 0.01;
   void engine.ctx.resume();
   if (baixo) tocarBaixo(engine.ctx, engine.mixer.barraBaixo, p.kit, 32.703 * 2 ** (semitons / 12), agora);
-  else tocarNota(engine.ctx, engine.mixer.barraMelodia, p.instrumento, (p.tom > 6 ? 130.81 : 261.63) * 2 ** (semitons / 12), agora, duracaoDoPasso(p.bpm));
+  else tocarNota(engine.ctx, engine.mixer.barraMelodia, p.instrumento, (p.tom > 6 ? 130.81 : 261.63) * 2 ** (semitons / 12), agora, duracaoDoPasso(p.bpm), p.sintetizador);
 
-  // Gravação na grade: só com o padrão tocando em repetição, no passo mais próximo.
   const padrao = p.padroes[estado.padraoAtual];
   if (!engine.tocando || estado.modo !== 'padrao' || estado.gravando || !padrao || p.beat.fonte !== 'padrao') return;
   const s = Math.round(engine.posicao() / duracaoDoPasso(p.bpm)) % passosDoPadrao(padrao);

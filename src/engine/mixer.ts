@@ -2,7 +2,7 @@
 // cadeia de master no final. A mesma classe serve para tocar ao vivo
 // (AudioContext) e para exportar (OfflineAudioContext).
 
-import type { PresetMaster, Project, Take } from '../model/project.ts';
+import { comPedaisNoProjeto, type PresetMaster, type Project, type Take } from '../model/project.ts';
 import { TAXA_DA_CURVA, curvaDeGanho, curvaEmDb } from './espaco.ts';
 import { chaveDaCadeia, criarCadeiaDeVoz, type CadeiaDeVoz } from './vocalChain.ts';
 
@@ -41,6 +41,8 @@ function curvaDeCorte(joelho: number): Float32Array {
 
 interface Canal {
   entrada: GainNode;
+  /** Volume desenhado ao longo da música (automação). */
+  automacao: GainNode;
   volume: GainNode;
   pan: StereoPannerNode;
   cadeia: CadeiaDeVoz;
@@ -76,6 +78,8 @@ export class Mixer {
   private eqMaster: { grave: BiquadFilterNode; medio: BiquadFilterNode; agudo: BiquadFilterNode };
   private largura: { direto: GainNode[]; cruzado: GainNode[] };
   private cola: DynamicsCompressorNode;
+  private bandas: DynamicsCompressorNode[] = [];
+  private automacaoDoBeat: GainNode;
   private ganhoMaster: GainNode;
   private limitador: DynamicsCompressorNode;
 
@@ -107,7 +111,8 @@ export class Mixer {
     this.espacoParaVoz.frequency.value = 3000;
     this.espacoParaVoz.Q.value = 1;
     this.cedeParaVoz = ctx.createGain();
-    this.espacoParaVoz.connect(this.cedeParaVoz).connect(this.entradaMaster);
+    this.automacaoDoBeat = ctx.createGain();
+    this.espacoParaVoz.connect(this.cedeParaVoz).connect(this.automacaoDoBeat).connect(this.entradaMaster);
     // "Estourar": o beat inteiro empurrado contra um limite, de propósito.
     this.estouro = { entrada: ctx.createGain(), forma: ctx.createWaveShaper(), saida: ctx.createGain(), ligado: false };
     this.estouro.forma.curve = curvaDeCorte(0.25);
@@ -123,7 +128,9 @@ export class Mixer {
       return f;
     };
     this.eqMaster = { grave: banda('lowshelf', 120), medio: banda('peaking', 1500), agudo: banda('highshelf', 8000) };
-    this.entradaMaster.connect(this.eqMaster.grave).connect(this.eqMaster.medio).connect(this.eqMaster.agudo);
+    // Tira o que há abaixo de 20 Hz: ninguém ouve, mas rouba folga do limitador.
+    const semSubgrave = banda('highpass', 20);
+    this.entradaMaster.connect(semSubgrave).connect(this.eqMaster.grave).connect(this.eqMaster.medio).connect(this.eqMaster.agudo);
 
     // Largura: mistura um pouco de cada lado no outro. Misturar tudo dá mono;
     // subtrair o lado oposto afasta os lados e abre o estéreo.
@@ -152,7 +159,26 @@ export class Mixer {
     const arredonda = ctx.createWaveShaper();
     arredonda.curve = curvaDeCorte(0.7);
     arredonda.oversample = '4x';
-    junta.connect(this.cola).connect(this.ganhoMaster).connect(this.clipper).connect(arredonda).connect(this.limitador).connect(this.saida);
+    // Compressor multibanda: a música é separada em grave, médio e agudo, e
+    // cada parte é comprimida sozinha. Assim um 808 forte não faz a voz
+    // "afundar" junto, como aconteceria num compressor só.
+    const passa = (tipo: BiquadFilterType, hz: number, de: AudioNode) => {
+      // Dois filtros iguais em série (Linkwitz-Riley): somando as bandas de volta, nada falta nem sobra.
+      const a = banda(tipo, hz);
+      const b = banda(tipo, hz);
+      de.connect(a).connect(b);
+      return b;
+    };
+    const soma = ctx.createGain();
+    const acimaDoGrave = passa('highpass', 150, junta);
+    for (const faixa of [passa('lowpass', 150, junta), passa('lowpass', 4000, acimaDoGrave), passa('highpass', 4000, acimaDoGrave)]) {
+      const comp = ctx.createDynamicsCompressor();
+      comp.attack.value = 0.02;
+      comp.release.value = 0.2;
+      faixa.connect(comp).connect(soma);
+      this.bandas.push(comp);
+    }
+    soma.connect(this.cola).connect(this.ganhoMaster).connect(this.clipper).connect(arredonda).connect(this.limitador).connect(this.saida);
     this.paraAsCaixas = ctx.createGain();
     this.saida.connect(this.paraAsCaixas).connect(ctx.destination);
 
@@ -167,6 +193,9 @@ export class Mixer {
     if (this.offline) return;
     const analisador = this.ctx.createAnalyser();
     analisador.fftSize = 1024;
+    // Faixa do espectro: de -85 a -15 dB, para música alta não encostar no topo do gráfico.
+    analisador.minDecibels = -85;
+    analisador.maxDecibels = -15;
     no.connect(analisador);
     this.medidores.set(nome, analisador);
   }
@@ -179,6 +208,11 @@ export class Mixer {
     let pico = 0;
     for (const v of this.amostras) pico = Math.max(pico, Math.abs(v));
     return 20 * Math.log10(pico || 1e-5);
+  }
+
+  /** Espectro atual da saída: quanta energia há em cada frequência (0 a 255 por faixa). */
+  espectro(destino: Uint8Array) {
+    this.medidores.get('master')?.getByteFrequencyData(destino);
   }
 
   /** Quanto o compressor de um take está reduzindo agora, em dB (0 ou negativo). */
@@ -204,6 +238,35 @@ export class Mixer {
     const duracao = trecho.length / TAXA_DA_CURVA;
     corte.setValueCurveAtTime(curvaEmDb(trecho, 4), t0, duracao);
     volume.setValueCurveAtTime(curvaDeGanho(trecho, p.beat.cede), t0, duracao);
+  }
+
+  /**
+   * Agenda as curvas de volume desenhadas no arranjo. Cada curva é uma lista
+   * de pontos ligados por retas; antes do primeiro e depois do último, o
+   * volume fica parado no valor deles.
+   */
+  agendarAutomacao(p: Project, t0: number, desde: number) {
+    const alvos: [AudioParam, [number, number][] | undefined][] = [[this.automacaoDoBeat.gain, p.automacao?.beat]];
+    for (const [id, canal] of this.canais) alvos.push([canal.automacao.gain, p.automacao?.[id]]);
+    for (const [param, pontos] of alvos) {
+      param.cancelScheduledValues(0);
+      if (!pontos?.length) {
+        param.setValueAtTime(1, 0);
+        continue;
+      }
+      const ordenados = [...pontos].sort((a, b) => a[0] - b[0]);
+      const valorEm = (t: number) => {
+        if (t <= ordenados[0][0]) return ordenados[0][1];
+        for (let k = 1; k < ordenados.length; k++) {
+          const [t1, v1] = ordenados[k - 1];
+          const [t2, v2] = ordenados[k];
+          if (t <= t2) return v1 + ((v2 - v1) * (t - t1)) / Math.max(1e-6, t2 - t1);
+        }
+        return ordenados[ordenados.length - 1][1];
+      };
+      param.setValueAtTime(valorEm(desde), t0);
+      for (const [t, v] of ordenados) if (t > desde) param.linearRampToValueAtTime(v, t0 + t - desde);
+    }
   }
 
   /** A cada bumbo, o 808 abaixa por um instante e volta: os dois deixam de se embolar. */
@@ -257,7 +320,9 @@ export class Mixer {
 
   /** Deixa a mesa igual ao projeto: cria/remove canais e ajusta os controles. */
   sincronizar(p: Project) {
-    this.barraDoBeat.gain.value = p.beat.volume;
+    p = comPedaisNoProjeto(p);
+    // Solo: com um canal em solo, todos os outros se calam.
+    this.barraDoBeat.gain.value = p.solo && p.solo !== 'beat' ? 0 : p.beat.volume;
     this.barraBateria.gain.value = p.volumes.bateria;
     this.barraBaixo.gain.value = p.volumes.baixo;
     this.barraMelodia.gain.value = p.volumes.melodia;
@@ -281,7 +346,7 @@ export class Mixer {
         this.canais.delete(id);
       }
     }
-    for (const take of p.takes) this.sincronizarCanal(take, p.bpm);
+    for (const take of p.takes) this.sincronizarCanal(take, p.bpm, !!p.solo && p.solo !== take.id);
     this.sincronizarMaster(p);
   }
 
@@ -289,15 +354,16 @@ export class Mixer {
     return this.canais.get(id)?.entrada;
   }
 
-  private sincronizarCanal(take: Take, bpm: number) {
+  private sincronizarCanal(take: Take, bpm: number, calado = false) {
     const chave = chaveDaCadeia(take, bpm);
     let canal = this.canais.get(take.id);
     if (!canal) {
       const entrada = this.ctx.createGain();
       const volume = this.ctx.createGain();
       const pan = this.ctx.createStereoPanner();
-      volume.connect(pan).connect(this.entradaMaster);
-      canal = { entrada, volume, pan, cadeia: criarCadeiaDeVoz(this.ctx, take, bpm), chave };
+      const automacao = this.ctx.createGain();
+      volume.connect(pan).connect(automacao).connect(this.entradaMaster);
+      canal = { entrada, automacao, volume, pan, cadeia: criarCadeiaDeVoz(this.ctx, take, bpm), chave };
       entrada.connect(canal.cadeia.entrada);
       canal.cadeia.saida.connect(volume);
       this.canais.set(take.id, canal);
@@ -311,7 +377,7 @@ export class Mixer {
       canal.chave = chave;
     }
     canal.cadeia.ajustar(take);
-    canal.volume.gain.value = take.mudo ? 0 : take.volume;
+    canal.volume.gain.value = take.mudo || calado ? 0 : take.volume;
     canal.pan.pan.value = take.pan;
   }
 
@@ -325,6 +391,11 @@ export class Mixer {
       this.largura.cruzado[lado].gain.value = (1 - a.largura) / 2;
     }
     const r = PRESETS_MASTER[p.master];
+    const multibanda = a.multibanda ?? 0;
+    for (const comp of this.bandas) {
+      comp.threshold.value = -30 * multibanda;
+      comp.ratio.value = 1 + 3 * multibanda;
+    }
     this.cola.threshold.value = r.cola[0];
     this.cola.ratio.value = r.cola[1];
     this.ganhoMaster.gain.value = 10 ** (r.ganhoDb / 20);

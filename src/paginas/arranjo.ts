@@ -1,8 +1,9 @@
 // Página Arranjo: a música inteira na linha do tempo e a ordem dos padrões.
 
-import { estado, mudou, relogio } from '../estado.ts';
-import { type Bloco, type Virada, compassosDoArranjo } from '../model/project.ts';
+import { engine, estado, mudou, relogio } from '../estado.ts';
+import { type Bloco, type Virada, compassosDoArranjo, duracaoDaMusica } from '../model/project.ts';
 import { secArranjo } from '../moldura.ts';
+import { reiniciarSeTocando } from '../transporte.ts';
 import { botao, campo, explicacao, h, numero, seletor } from '../ui/controles.ts';
 import { desenharBeat } from './beat.ts';
 import { abrirPadrao } from './grades.ts';
@@ -15,6 +16,7 @@ export function linhaDoTempo(): HTMLElement {
     : estado.projeto.arranjo.map((b) => {
         const bloco = h('div', { className: 'bloco-padrao' + (b.padrao === estado.padraoAtual ? ' atual' : ''), title: 'Abrir este padrão' }, `${b.nome || estado.projeto.padroes[b.padrao]?.nome || '?'} ×${b.vezes}`);
         bloco.style.flexGrow = String(b.vezes);
+        bloco.dataset.cor = String(b.padrao % 5);
         bloco.onclick = () => abrirPadrao(b.padrao);
         return bloco;
       });
@@ -84,12 +86,121 @@ export function arranjo(): HTMLElement {
   return lista;
 }
 
+let alvoDaAutomacao = 'beat';
+
+/**
+ * Editor de automação: uma curva de volume desenhada ao longo da música,
+ * para o beat ou para uma voz. Clique num lugar vazio para criar um ponto,
+ * arraste para mover, clique duas vezes num ponto para apagar.
+ */
+function automacao(): HTMLElement {
+  const p = estado.projeto;
+  if (alvoDaAutomacao !== 'beat' && !p.takes.some((t) => t.id === alvoDaAutomacao)) alvoDaAutomacao = 'beat';
+  const duracao = duracaoDaMusica(p, engine.buffers);
+  const pontos = () => ((p.automacao ??= {})[alvoDaAutomacao] ??= []);
+  const tela = h('canvas', { className: 'curva automacao', width: 900, height: 140 });
+  const TOPO = 1.5;
+  const x = (t: number) => (t / duracao) * tela.width;
+  const y = (v: number) => tela.height - (v / TOPO) * tela.height;
+  const desenhar = () => {
+    const g = tela.getContext('2d');
+    if (!g) return;
+    g.clearRect(0, 0, tela.width, tela.height);
+    g.strokeStyle = '#3a424b';
+    g.fillStyle = '#7d8793';
+    g.font = '11px system-ui';
+    g.beginPath();
+    g.moveTo(0, y(1));
+    g.lineTo(tela.width, y(1));
+    g.stroke();
+    g.fillText('100%', 4, y(1) - 4);
+    const lista = [...pontos()].sort((a, b) => a[0] - b[0]);
+    g.strokeStyle = '#ff9d2e';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, y(lista[0]?.[1] ?? 1));
+    for (const [t, v] of lista) g.lineTo(x(t), y(v));
+    g.lineTo(tela.width, y(lista[lista.length - 1]?.[1] ?? 1));
+    g.stroke();
+    for (const [t, v] of lista) {
+      g.beginPath();
+      g.arc(x(t), y(v), 7, 0, 2 * Math.PI);
+      g.fillStyle = '#ff9d2e';
+      g.fill();
+      g.strokeStyle = '#fff';
+      g.stroke();
+    }
+  };
+  const naTela = (e: MouseEvent) => {
+    const r = tela.getBoundingClientRect();
+    return { t: Math.min(duracao, Math.max(0, ((e.clientX - r.left) / r.width) * duracao)), v: Math.min(TOPO, Math.max(0, (1 - (e.clientY - r.top) / r.height) * TOPO)), px: ((e.clientX - r.left) / r.width) * tela.width, py: ((e.clientY - r.top) / r.height) * tela.height };
+  };
+  const pertoDe = (m: { px: number; py: number }) => pontos().find(([t, v]) => Math.hypot(x(t) - m.px, y(v) - m.py) < 16);
+  let preso: [number, number] | null = null;
+  tela.style.touchAction = 'none';
+  tela.onpointerdown = (e) => {
+    const m = naTela(e);
+    preso = pertoDe(m) ?? null;
+    if (!preso) {
+      preso = [m.t, m.v];
+      pontos().push(preso);
+    }
+    tela.setPointerCapture(e.pointerId);
+    desenhar();
+  };
+  tela.onpointermove = (e) => {
+    if (!preso) return;
+    const m = naTela(e);
+    preso[0] = m.t;
+    preso[1] = m.v;
+    desenhar();
+  };
+  tela.onpointerup = () => {
+    if (!preso) return;
+    preso = null;
+    mudou();
+    reiniciarSeTocando();
+  };
+  tela.ondblclick = (e) => {
+    const alvo = pertoDe(naTela(e));
+    if (!alvo) return;
+    p.automacao![alvoDaAutomacao] = pontos().filter((ponto) => ponto !== alvo);
+    mudou();
+    desenhar();
+    reiniciarSeTocando();
+  };
+  desenhar();
+  return h('div', {},
+    h('div', { className: 'linha' },
+      seletor('Volume de', [['beat', 'Beat'] as [string, string], ...p.takes.map((t) => [t.id, t.nome] as [string, string])], alvoDaAutomacao, (v) => {
+        alvoDaAutomacao = v;
+        desenharBeat();
+      }),
+      botao('Limpar a curva', () => {
+        if (p.automacao) delete p.automacao[alvoDaAutomacao];
+        mudou();
+        desenharBeat();
+        reiniciarSeTocando();
+      }),
+    ),
+    tela,
+    explicacao([
+      'Automação é o volume mudando sozinho ao longo da música. A linha no meio é o volume normal (100%).',
+      'Clique num lugar vazio para criar um ponto e arraste para mover; dois cliques num ponto apagam. Os pontos são ligados por retas.',
+      'Usos comuns: baixar o beat no verso e subir no refrão; fazer a música entrar ou sair aos poucos; destacar uma frase da voz.',
+      'A curva vale só no modo MÚSICA e entra na exportação.',
+    ]),
+  );
+}
+
 export function desenharArranjo() {
   const beat = estado.projeto.beat;
   secArranjo.replaceChildren(
     h('h2', {}, 'Arranjo'),
     h('p', { className: 'nota' }, 'A música inteira de uma vez: a ordem dos padrões e onde cada voz entra. Clique numa voz para ouvir a partir daquele ponto.'),
     linhaDoTempo(),
+    h('h3', {}, 'Automação de volume'),
+    automacao(),
     ...(beat.fonte === 'padrao' ? [
       h('h3', {}, 'Ordem dos padrões'),
       arranjo(),

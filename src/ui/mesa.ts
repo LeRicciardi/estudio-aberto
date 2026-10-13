@@ -17,6 +17,8 @@ export interface ContextoDoMixer {
   mudou(agrupar?: boolean): void;
 }
 
+const CORES = ['#ff9d2e', '#6cb6ff', '#ff6b9d', '#7dde5a', '#c79bff', '#ffd84a'];
+
 /** Medidor vertical: verde até -12 dB, amarelo até -3, vermelho acima. */
 function medidor(c: ContextoDoMixer, canal: string): HTMLElement {
   const nivel = h('div');
@@ -51,6 +53,11 @@ function faixa(nome: string, classe: string, ...corpo: (Node | string)[]): HTMLE
 export function mesa(c: ContextoDoMixer): HTMLElement {
   const p = c.projeto;
   const faixas: HTMLElement[] = [];
+  const solo = (canal: string) => botao('Solo', () => {
+    p.solo = p.solo === canal ? undefined : canal;
+    c.mudou();
+    c.redesenhar();
+  }, p.solo === canal ? 'ativo' : '');
   if (p.beat.fonte === 'padrao') {
     for (const [nome, canal] of [['Bateria', 'bateria'], ['808', 'baixo'], ['Melodia', 'melodia']] as const) {
       faixas.push(faixa(nome, 'do-beat',
@@ -60,9 +67,10 @@ export function mesa(c: ContextoDoMixer): HTMLElement {
   }
   faixas.push(faixa(p.beat.fonte === 'arquivo' ? 'Beat' : 'Beat (soma)', 'do-beat',
     h('div', { className: 'faixa-corpo' }, medidor(c, 'beat'), volume(p.beat.volume, 1.2, (v) => { p.beat.volume = v; }, c)),
+    solo('beat'),
   ));
-  for (const take of p.takes) {
-    faixas.push(faixa(take.nome, 'da-voz' + (take.mudo ? ' muda' : ''),
+  p.takes.forEach((take, i) => {
+    const tira = faixa(take.nome, 'da-voz' + (take.mudo ? ' muda' : ''),
       giratorio({ rotulo: 'Lado', min: -1, max: 1, valor: take.pan, padrao: 0, formato: (v) => (Math.abs(v) < 0.03 ? 'Centro' : `${Math.round(Math.abs(v) * 100)}% ${v < 0 ? 'E' : 'D'}`), aoMudar: (v) => { take.pan = v; } }),
       h('div', { className: 'faixa-corpo' }, medidor(c, take.id), volume(take.volume, 1.5, (v) => { take.volume = v; }, c)),
       botao(take.mudo ? 'Mudo' : 'Mudo', () => {
@@ -70,9 +78,12 @@ export function mesa(c: ContextoDoMixer): HTMLElement {
         c.mudou();
         c.redesenhar();
       }, take.mudo ? 'ativo' : ''),
+      solo(take.id),
       botao('Efeitos', () => c.abrirEfeitos(take)),
-    ));
-  }
+    );
+    tira.style.borderTopColor = CORES[i % CORES.length];
+    faixas.push(tira);
+  });
   faixas.push(faixa('Master', 'do-master',
     h('div', { className: 'faixa-corpo' }, medidor(c, 'master')),
     h('span', { className: 'nota' }, PRESETS_MASTER[p.master].nome),
@@ -82,6 +93,7 @@ export function mesa(c: ContextoDoMixer): HTMLElement {
     explicacao([
       'Cada faixa é um canal da música. O medidor mostra o volume agora; o número embaixo dele é o pico em dB (0 é o máximo).',
       'Comece pelo beat e suba a voz até a letra ficar clara sem se descolar do beat. Verde e amarelo é saudável; vermelho constante no Master pede para baixar tudo um pouco.',
+      'Solo cala todos os outros canais, para ouvir um só e achar um problema. Não muda a exportação. Clique de novo para voltar.',
       'Lado joga a voz para a esquerda ou para a direita. A voz principal fica no centro; dobras e adlibs ganham espaço nos lados.',
       'O Master é a soma de tudo, depois do acabamento.',
     ]),

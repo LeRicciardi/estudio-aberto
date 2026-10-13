@@ -1,12 +1,12 @@
 // Motor ao vivo: toca o projeto a partir de um ponto, e exporta a mix final.
 
 import {
-  LANES, STEPS, bufferDoBeat, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, localizarPasso, passosDoPadrao, semitonsDoGrau,
+  LANES, STEPS, bufferDoBeat, bufferDoTake, comPedaisNoProjeto, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, localizarPasso, passosDoPadrao, semitonsDoGrau,
   type Padrao, type PassoLocalizado, type Project, type Take,
 } from '../model/project.ts';
 import { TAXA_DA_CURVA, presencaDaVoz, type TrechoDeVoz } from './espaco.ts';
 import { fimDasFrases } from './limpeza.ts';
-import { limitar } from './limiter.ts';
+import { limitar, picoRealDb } from './limiter.ts';
 import { medirLufs } from './loudness.ts';
 import { Mixer } from './mixer.ts';
 import { tocarBaixo, tocarBaixoSample, tocarNota, tocarTambor, tocarVirada } from './synths.ts';
@@ -102,7 +102,7 @@ function tocarPasso(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers: Bu
   }
   if (!mudos.melodia) {
     padrao.melodia.forEach((linha, g) => {
-      if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur);
+      if (linha[s]) tocarNota(ctx, mixer.barraMelodia, p.instrumento, hzDoGrau(p, g, 'melodia'), quando, dur, p.sintetizador);
     });
   }
 }
@@ -333,6 +333,7 @@ export class Engine {
       this.parar();
     }
     await this.ctx.resume();
+    p = comPedaisNoProjeto(p);
     this.projeto = p;
     this.padraoEmLoop = padraoEmLoop;
     this.mixer.sincronizar(p);
@@ -340,9 +341,11 @@ export class Engine {
     this.desde = desde;
     if (padraoEmLoop !== undefined) {
       this.mixer.agendarEspaco(null, p, this.t0, 0);
+      this.mixer.agendarAutomacao({ ...p, automacao: undefined }, this.t0, 0);
       this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, Infinity);
     } else {
       this.mixer.agendarEspaco(presenca(p, this.buffers), p, this.t0, desde);
+      this.mixer.agendarAutomacao(p, this.t0, desde);
       this.fontes = agendarAudios(this.ctx, this.mixer, p, this.buffers, this.t0, desde);
       if (p.beat.fonte === 'padrao') this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, compassosDoArranjo(p) * STEPS);
     }
@@ -407,9 +410,12 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   const duracao = duracaoDaMusica(p, buffers) + 2;
   const ctx = new OfflineAudioContext(2, Math.ceil(duracao * taxa), taxa);
   const mixer = new Mixer(ctx, true);
+  // O solo é uma ajuda de escuta: nunca entra na exportação.
+  p = { ...comPedaisNoProjeto(p), solo: undefined };
   mixer.sincronizar(p);
   agendarAudios(ctx, mixer, p, buffers, 0, 0, partes);
   mixer.agendarEspaco(presenca(p, buffers, partes), p, 0, 0);
+  mixer.agendarAutomacao(p, 0, 0);
   if (partes !== 'voz' && p.beat.fonte === 'padrao') {
     for (let i = 0; i < compassosDoArranjo(p) * STEPS; i++) {
       tocarPassoDaMusica(ctx, mixer, p, buffers, i, tempoDoPasso(i, p.bpm, p.swing));
@@ -430,9 +436,7 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   }
   limitar(canais, taxa, -1);
 
-  let pico = 0;
-  for (const canal of canais) for (const v of canal) pico = Math.max(pico, Math.abs(v));
-  return { audio, picoDb: 20 * Math.log10(pico || 1e-6), lufs: medirLufs(canais, taxa) };
+  return { audio, picoDb: picoRealDb(canais), lufs: medirLufs(canais, taxa) };
 }
 
 /**
@@ -465,7 +469,11 @@ export function paraWav(audio: AudioBuffer, bits: 16 | 24 = 16): Blob {
     for (let c = 0; c < canais; c++) {
       const s = Math.max(-1, Math.min(1, dados[c][i]));
       if (bits === 16) {
-        v.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        // Dither: um ruído mínimo (um degrau do formato) somado antes de
+        // arredondar. Sem ele, os finais de nota e de reverb viram distorção
+        // áspera ao passar para 16 bits; com ele, viram um chiado inaudível.
+        const ruido = (Math.random() - Math.random()) / 0x8000;
+        v.setInt16(pos, Math.max(-0x8000, Math.min(0x7fff, Math.round((s + ruido) * 0x7fff))), true);
       } else {
         const inteiro = Math.round(s < 0 ? s * 0x800000 : s * 0x7fffff);
         v.setUint8(pos, inteiro & 0xff);
@@ -479,14 +487,14 @@ export function paraWav(audio: AudioBuffer, bits: 16 | 24 = 16): Blob {
 }
 
 /**
- * Codifica em MP3 (192 kbps), o formato prático para mandar no WhatsApp ou
+ * Codifica em MP3 (320 kbps, o piso que DJs e tocadores esperam), o formato prático para mandar no WhatsApp ou
  * ouvir no celular. Para distribuidoras, use sempre o WAV. O codificador
  * (LAME em WebAssembly) só é carregado quando esta função é chamada.
  */
 export async function paraMp3(audio: AudioBuffer, etiquetas?: Uint8Array): Promise<Blob> {
   const { createMp3Encoder } = await import('wasm-media-encoders');
   const codificador = await createMp3Encoder();
-  codificador.configure({ sampleRate: audio.sampleRate, channels: 2, bitrate: 192 });
+  codificador.configure({ sampleRate: audio.sampleRate, channels: 2, bitrate: 320 });
   const esq = audio.getChannelData(0);
   const dir = audio.numberOfChannels > 1 ? audio.getChannelData(1) : esq;
   // O codificador reaproveita a memória de saída: cada pedaço precisa ser copiado.

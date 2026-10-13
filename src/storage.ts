@@ -24,8 +24,15 @@ export function carregarProjeto(): Project {
   return novoProjeto();
 }
 
-export function salvarProjeto(p: Project) {
-  localStorage.setItem(CHAVE, JSON.stringify(p));
+/** Guarda o projeto. Devolve false se o navegador estiver sem espaço. */
+export function salvarProjeto(p: Project): boolean {
+  try {
+    localStorage.setItem(CHAVE, JSON.stringify(p));
+    return true;
+  } catch {
+    window.dispatchEvent(new Event('estudio:sem-espaco'));
+    return false;
+  }
 }
 
 function abrir(): Promise<IDBDatabase> {
@@ -46,7 +53,11 @@ async function operar<T>(modo: IDBTransactionMode, acao: (loja: IDBObjectStore) 
   });
 }
 
-export const guardarAudio = (id: string, audio: AudioSalvo) => operar('readwrite', (l) => l.put(audio, id));
+export const guardarAudio = (id: string, audio: AudioSalvo) =>
+  operar('readwrite', (l) => l.put(audio, id)).catch((erro) => {
+    window.dispatchEvent(new Event('estudio:sem-espaco'));
+    throw erro;
+  });
 export const lerAudio = (id: string) => operar<AudioSalvo | undefined>('readonly', (l) => l.get(id));
 export const apagarAudio = (id: string) => operar('readwrite', (l) => l.delete(id));
 export const listarAudios = () => operar<IDBValidKey[]>('readonly', (l) => l.getAllKeys());
@@ -90,6 +101,7 @@ export const abrirVersao = (v: Versao) => normalizar(JSON.parse(v.projeto) as Pr
 /** Áudio que não pode ser apagado: o do projeto aberto e o de todas as versões guardadas. */
 export async function audiosEmUso(p: Project): Promise<Set<string>> {
   const usados = new Set(idsDeAudio(p));
+  for (const chave of await listarAudios()) if (String(chave).startsWith(PREFIXO_DO_COFRE)) usados.add(String(chave));
   for (const v of await listarVersoes()) {
     usados.add(v.chave);
     for (const audioId of idsDeAudio(abrirVersao(v))) usados.add(audioId);
@@ -156,4 +168,52 @@ export async function juntarVozes(texto: string, p: Project, sufixo: string): Pr
     quantas++;
   }
   return quantas;
+}
+
+// ---------- cofre da gravação em andamento ----------
+// Enquanto a pessoa grava, o áudio vai sendo guardado em pedaços. Se a aba
+// cair, o celular travar ou a bateria acabar, o take é recuperado ao reabrir.
+
+const PREFIXO_DO_COFRE = 'gravando:';
+const CHAVE_DO_COFRE = 'estudio-aberto:gravando';
+
+export function abrirCofre(taxa: number, inicio: number) {
+  localStorage.setItem(CHAVE_DO_COFRE, JSON.stringify({ taxa, inicio, pedacos: 0 }));
+}
+
+export async function guardarNoCofre(amostras: Float32Array) {
+  const dados = JSON.parse(localStorage.getItem(CHAVE_DO_COFRE) ?? 'null') as { taxa: number; inicio: number; pedacos: number } | null;
+  if (!dados || !amostras.length) return;
+  await guardarAudio(PREFIXO_DO_COFRE + dados.pedacos, { tipo: 'pcm', taxa: dados.taxa, amostras });
+  localStorage.setItem(CHAVE_DO_COFRE, JSON.stringify({ ...dados, pedacos: dados.pedacos + 1 }));
+}
+
+export async function fecharCofre() {
+  localStorage.removeItem(CHAVE_DO_COFRE);
+  for (const chave of await listarAudios()) if (String(chave).startsWith(PREFIXO_DO_COFRE)) await apagarAudio(String(chave));
+}
+
+/** Se houver uma gravação interrompida, devolve o áudio dela e onde começava. */
+export async function recuperarDoCofre(): Promise<{ amostras: Float32Array; taxa: number; inicio: number } | null> {
+  const dados = JSON.parse(localStorage.getItem(CHAVE_DO_COFRE) ?? 'null') as { taxa: number; inicio: number; pedacos: number } | null;
+  if (!dados) return null;
+  const partes: Float32Array[] = [];
+  for (let k = 0; k < dados.pedacos; k++) {
+    const pedaco = await lerAudio(PREFIXO_DO_COFRE + k);
+    if (pedaco?.tipo === 'pcm') partes.push(pedaco.amostras);
+  }
+  const amostras = new Float32Array(partes.reduce((n, p) => n + p.length, 0));
+  let pos = 0;
+  for (const p of partes) {
+    amostras.set(p, pos);
+    pos += p.length;
+  }
+  return amostras.length > dados.taxa ? { amostras, taxa: dados.taxa, inicio: dados.inicio } : null;
+}
+
+/** Quanto espaço o estúdio usa e quanto o navegador permite, em megabytes. */
+export async function espaco(): Promise<{ usado: number; total: number; protegido: boolean } | null> {
+  if (!navigator.storage?.estimate) return null;
+  const e = await navigator.storage.estimate();
+  return { usado: (e.usage ?? 0) / 1048576, total: (e.quota ?? 0) / 1048576, protegido: (await navigator.storage.persisted?.()) ?? false };
 }
