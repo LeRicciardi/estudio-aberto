@@ -238,3 +238,28 @@ body.soltando::after { content: 'Solte o arquivo: áudio vira o beat, .estudio.j
   .transporte > .medidor { display: none; }
   .giratorio { width: 72px; }
 }
+
+/* ---------- letra ---------- */
+.duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 12px; }
+textarea { width: 100%; font: inherit; line-height: 1.7; color: var(--texto); background: var(--fosso); border: 1px solid var(--borda); border-radius: 4px; padding: 8px 10px; resize: vertical; }
+.compassos { margin: 0; padding: 8px 10px; list-style: none; line-height: 1.7; background: var(--fosso); border: 1px solid #000; border-radius: 4px; max-height: 480px; overflow-y: auto; }
+.compassos li { display: grid; grid-template-columns: 3ch 1fr 3ch; gap: 8px; }
+.compassos li:nth-child(4n) { border-bottom: 1px solid var(--borda); }
+.compassos li.pausa .compasso-texto { color: var(--suave); font-style: italic; }
+.compassos li.cheia .compasso-silabas { color: var(--gravar); font-weight: 700; }
+.compasso-numero, .compasso-silabas { color: var(--suave); font: 12px/2.1 ui-monospace, Menlo, Consolas, monospace; text-align: right; }
+
+.teleprompter { max-height: 190px; overflow-y: auto; margin: 10px 0; padding: 10px 14px; background: var(--fosso); border: 1px solid #000; border-radius: 4px; font-size: 18px; line-height: 1.6; }
+.teleprompter p { margin: 0; color: var(--suave); }
+.teleprompter p.atual { color: var(--destaque); font-weight: 700; }
+.teleprompter .nota { font-size: 14px; }
+
+/* ---------- diagnóstico e versões ---------- */
+.achado { margin-top: 10px; padding: 10px 12px; border-left: 4px solid var(--borda); background: rgba(0, 0, 0, 0.2); border-radius: 0 4px 4px 0; }
+.achado p { margin: 4px 0 8px; color: var(--suave); }
+.achado.problema { border-color: var(--gravar); }
+.achado.atencao { border-color: var(--destaque); }
+.achado.ok { border-color: var(--luz); }
+.achado.ok p { margin-bottom: 0; }
+.versoes .linha { align-items: center; margin: 6px 0; }
+.versoes span { flex: 1 1 200px; }

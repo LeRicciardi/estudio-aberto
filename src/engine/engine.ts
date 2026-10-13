@@ -4,6 +4,7 @@ import {
   LANES, STEPS, bufferDoTake, compassosDoArranjo, duracaoDaMusica, duracaoDoTrecho, padraoNoCompasso, semitonsDoGrau,
   type Padrao, type Project,
 } from '../model/project.ts';
+import { presencaDaVoz, type TrechoDeVoz } from './espaco.ts';
 import { limitar } from './limiter.ts';
 import { medirLufs } from './loudness.ts';
 import { Mixer } from './mixer.ts';
@@ -163,6 +164,40 @@ function agendarAudios(ctx: BaseAudioContext, mixer: Mixer, p: Project, buffers:
   return fontes;
 }
 
+/**
+ * Onde e com que volume cada voz soa na música, já considerando o que foi
+ * aparado e os trechos escolhidos na montagem. Serve para o beat ceder espaço.
+ */
+function trechosDeVoz(p: Project, buffers: Buffers): TrechoDeVoz[] {
+  const trechos: TrechoDeVoz[] = [];
+  const dur = duracaoDoTrecho(p);
+  for (const take of p.takes) {
+    const buf = bufferDoTake(take, buffers);
+    if (!buf || take.mudo) continue;
+    const dados = buf.getChannelData(0);
+    const taxa = buf.sampleRate;
+    const volume = take.volume * 10 ** (take.edicao.ganhoDb / 20);
+    const comeco = take.inicio + take.edicao.ini;
+    const fim = take.inicio + buf.duration - take.edicao.fim;
+    const juntar = (de: number, ate: number) => {
+      const a = Math.max(comeco, de);
+      const b = Math.min(fim, ate);
+      if (b <= a) return;
+      trechos.push({ amostras: dados.subarray(Math.floor((a - take.inicio) * taxa), Math.floor((b - take.inicio) * taxa)), taxa, inicio: a, volume });
+    };
+    if (!p.montagem.ligada || !take.naMontagem) juntar(-Infinity, Infinity);
+    else p.montagem.escolha.forEach((escolhido, i) => escolhido === take.id && juntar(i * dur, (i + 1) * dur));
+  }
+  return trechos;
+}
+
+/** Presença da voz ao longo da música, ou null quando não há voz ou o espaço está desligado. */
+function presenca(p: Project, buffers: Buffers, partes: Partes = 'tudo'): Float32Array | null {
+  if (!p.beat.espaco || partes !== 'tudo') return null;
+  const trechos = trechosDeVoz(p, buffers);
+  return trechos.length ? presencaDaVoz(trechos, duracaoDaMusica(p, buffers) + 2) : null;
+}
+
 /** O que entra na exportação: a música toda, só as vozes ou só o beat. */
 export type Partes = 'tudo' | 'voz' | 'beat';
 
@@ -204,8 +239,10 @@ export class Engine {
     this.t0 = this.ctx.currentTime + 0.06 + espera;
     this.desde = desde;
     if (padraoEmLoop !== undefined) {
+      this.mixer.agendarEspaco(null, p, this.t0, 0);
       this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, Infinity);
     } else {
+      this.mixer.agendarEspaco(presenca(p, this.buffers), p, this.t0, desde);
       this.fontes = agendarAudios(this.ctx, this.mixer, p, this.buffers, this.t0, desde);
       if (p.beat.fonte === 'padrao') this.relogio.iniciar(this.t0, desde, p.bpm, p.swing, compassosDoArranjo(p) * STEPS);
     }
@@ -272,6 +309,7 @@ export async function exportarMix(p: Project, buffers: Buffers, partes: Partes =
   const mixer = new Mixer(ctx, true);
   mixer.sincronizar(p);
   agendarAudios(ctx, mixer, p, buffers, 0, 0, partes);
+  mixer.agendarEspaco(presenca(p, buffers, partes), p, 0, 0);
   if (partes !== 'voz' && p.beat.fonte === 'padrao') {
     for (let i = 0; i < compassosDoArranjo(p) * STEPS; i++) {
       tocarPasso(ctx, mixer, p, buffers, padraoNoCompasso(p, Math.floor(i / STEPS)), i, tempoDoPasso(i, p.bpm, p.swing));

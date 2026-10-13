@@ -125,8 +125,10 @@ export interface Project {
     audioId?: string;
     nomeArquivo?: string;
     volume: number;
-    /** Abre um espaço no beat, na região da voz, para a letra aparecer. */
+    /** O beat cede lugar quando a voz entra: corte na faixa da clareza e leve queda de volume. */
     espaco: boolean;
+    /** Quanto o volume do beat cai (em dB) enquanto a voz canta. */
+    cede: number;
   };
   /** Samples do usuário por som da bateria; sem sample, o som é sintetizado. */
   samples: Partial<Record<LaneId, { audioId: string; nome: string }>>;
@@ -146,6 +148,8 @@ export interface Project {
   latenciaMs: number | null;
   master: PresetMaster;
   ajusteDoMaster: AjusteDoMaster;
+  /** Letra: cada linha vale um compasso, a partir de `compasso` (o primeiro é 1). */
+  letra: { texto: string; compasso: number };
 }
 
 export function padraoVazio(nome: string): Padrao {
@@ -215,6 +219,8 @@ export function normalizar(p: Project): Project {
   p.samples ??= {};
   p.montagem ??= { ligada: false, compassos: 2, escolha: [] };
   p.ajusteDoMaster ??= { graveDb: 0, medioDb: 0, agudoDb: 0, largura: 1, alvoLufs: null };
+  p.beat.cede ??= 1.5;
+  p.letra ??= { texto: '', compasso: 1 };
   for (const t of p.takes) {
     t.naMontagem ??= false;
     t.tune.intensidade ??= 1;

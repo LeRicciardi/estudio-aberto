@@ -1,14 +1,36 @@
 // Página Projeto: arquivo, instalação como aplicativo e atalhos.
 
-import { abrirDeArquivo, salvarEmArquivo } from '../arquivo.ts';
+import { abrirDeArquivo, restaurarAudio, salvarEmArquivo } from '../arquivo.ts';
 import { ATALHOS } from '../atalhos.ts';
-import { EventoDeInstalacao, engine, estado, mudou } from '../estado.ts';
+import { type EventoDeInstalacao, engine, estado, mudou } from '../estado.ts';
 import { novoProjeto } from '../model/generos.ts';
 import { secProjeto } from '../moldura.ts';
+import { abrirVersao, apagarAudio, guardarVersao, listarVersoes } from '../storage.ts';
 import { desenharTudo, parar } from '../transporte.ts';
 import { botao, campo, h } from '../ui/controles.ts';
 
+const listaDeVersoes = h('div', { className: 'versoes' });
+
+async function desenharVersoes() {
+  const versoes = await listarVersoes();
+  listaDeVersoes.replaceChildren(...versoes.map((v) => h('div', { className: 'linha' },
+    h('span', {}, `${new Date(v.quando).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${v.nome}`),
+    botao('Voltar para esta', async () => {
+      if (!confirm('Voltar para esta versão? A música atual é guardada como uma versão antes.')) return;
+      await guardarVersao(estado.projeto, 'Antes de voltar');
+      parar();
+      estado.projeto = abrirVersao(v);
+      estado.padraoAtual = 0;
+      mudou();
+      desenharTudo();
+      await restaurarAudio();
+    }),
+    botao('Apagar', () => void apagarAudio(v.chave).then(desenharVersoes), 'perigo'),
+  )));
+}
+
 export function desenharProjeto() {
+  void desenharVersoes();
   const abrir = h('input', { type: 'file', accept: '.json,application/json' });
   abrir.onchange = () => abrir.files?.[0] && void abrirDeArquivo(abrir.files[0]);
   secProjeto.replaceChildren(
@@ -18,6 +40,10 @@ export function desenharProjeto() {
       botao('Salvar projeto em arquivo', () => void salvarEmArquivo()),
       campo('Abrir projeto de um arquivo', abrir),
     ),
+    h('h3', {}, 'Versões'),
+    h('p', { className: 'nota' }, 'Guarde um retrato da música antes de mexer em algo arriscado. Cada exportação também guarda uma versão. Ficam neste navegador, até 15.'),
+    botao('Guardar versão agora', () => void guardarVersao(estado.projeto, 'Manual').then(desenharProjeto)),
+    listaDeVersoes,
     h('h3', {}, 'Aplicativo'),
     instalacao(),
     h('details', { className: 'explica atalhos' },

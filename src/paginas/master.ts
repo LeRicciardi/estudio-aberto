@@ -1,11 +1,15 @@
 // Página Master: acabamento da música e exportação.
 
+import { camelot } from '../engine/diagnostico.ts';
 import { type Partes, exportarMix, paraMp3, paraWav } from '../engine/engine.ts';
-import { PRESETS_MASTER } from '../engine/mixer.ts';
+import { type Escuta, PRESETS_MASTER } from '../engine/mixer.ts';
 import { av, engine, estado } from '../estado.ts';
-import { type PresetMaster } from '../model/project.ts';
+import { NOTAS, type PresetMaster } from '../model/project.ts';
 import { secMaster } from '../moldura.ts';
+import { guardarVersao } from '../storage.ts';
 import { baixar, botao, explicacao, giratorio, h, opcoes, seletor } from '../ui/controles.ts';
+import { painelDeDiagnostico } from './diagnostico.ts';
+import { desenharProjeto } from './projeto.ts';
 
 export function desenharMaster() {
   const resultado = h('p', { className: 'nota' });
@@ -13,7 +17,10 @@ export function desenharMaster() {
     resultado.textContent = 'Renderizando...';
     try {
       const r = await exportarMix(estado.projeto, engine.buffers, partes);
-      const nome = `${estado.projeto.nome || 'musica'}${sufixo}`;
+      // Nome no padrão que DJs e colaboradores esperam: versão, BPM e tom (com a notação Camelot).
+      const p = estado.projeto;
+      const nome = `${p.nome || 'musica'}${sufixo} [${p.bpm} BPM ${camelot(p.tom, p.escala)} ${NOTAS[p.tom]} ${p.escala}]`;
+      if (partes === 'tudo') void guardarVersao(p, 'Exportação').then(desenharProjeto);
       if (mp3) baixar(await paraMp3(r.audio), `${nome}.mp3`);
       else baixar(paraWav(r.audio), `${nome}.wav`);
       const lufs = Number.isFinite(r.lufs) ? `${r.lufs.toFixed(1)} LUFS` : 'silêncio';
@@ -62,17 +69,31 @@ export function desenharMaster() {
         ]),
       ),
     ),
+    painelDeDiagnostico(),
+    h('h3', {}, 'Conferir em outras caixas'),
+    h('div', { className: 'abas' }, ...([['normal', 'Normal'], ['mono', 'Mono'], ['celular', 'Caixa de celular']] as [Escuta, string][]).map(([modo, rotulo]) =>
+      botao(rotulo, () => {
+        engine.mixer.definirEscuta(modo);
+        desenharMaster();
+      }, engine.mixer.escuta === modo ? 'ativo' : ''),
+    )),
+    explicacao([
+      'Muita gente vai ouvir sua música em mono (som de festa, caixa bluetooth) ou na caixa do celular, que não toca grave.',
+      'Se em "Mono" algo some, o estéreo está aberto demais. Se em "Caixa de celular" o 808 desaparece e a música perde o chão, ele precisa de mais harmônicos (kit com distorção) ou de uma melodia que marque as notas.',
+      'Isso muda só o que você ouve agora; a exportação não é afetada.',
+    ]),
     h('h3', {}, 'Exportar'),
     h('div', { className: 'linha' },
       Object.assign(botao('Exportar música (WAV)', () => void exportar('tudo', ''), 'principal'), { id: 'exportar-wav' }),
       botao('MP3 para compartilhar', () => void exportar('tudo', '', true)),
-      av(botao('Só as vozes', () => void exportar('voz', ' - vozes'))),
-      av(botao('Só o beat', () => void exportar('beat', ' - beat'))),
+      av(botao('Acapella (só as vozes)', () => void exportar('voz', ' (Acapella)'))),
+      av(botao('Instrumental (só o beat)', () => void exportar('beat', ' (Instrumental)'))),
     ),
     resultado,
     explicacao([
       'WAV (16 bits, 44,1 kHz) é o formato aceito pelas distribuidoras. MP3 é para mandar no WhatsApp e ouvir no celular.',
-      '"Só as vozes" e "Só o beat" servem para mandar a outra pessoa mixar ou para fazer versões (acapella, instrumental).',
+      'Acapella e instrumental servem para mandar a outra pessoa mixar e para DJs fazerem montagens e viradas.',
+      'O nome do arquivo leva o BPM e o tom, também na notação Camelot (ex.: 8A), que DJs usam para saber quais músicas combinam.',
     ]),
   );
 }

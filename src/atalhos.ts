@@ -16,7 +16,7 @@ export const ATALHOS: [string, string][] = [
   ['Ctrl/⌘ + E', 'Exportar música (WAV)'],
   ['← →', 'Voltar / avançar 5 segundos'],
   ['Home', 'Voltar ao início'],
-  ['1 a 9', 'Ir para a página'],
+  ['1 a 9 e 0', 'Ir para a página'],
 ];
 
 window.addEventListener('keydown', (e) => {
@@ -48,8 +48,9 @@ window.addEventListener('keydown', (e) => {
     irPara(engine.posicao() + (e.key === 'ArrowLeft' ? -5 : 5));
   } else if (e.key === 'Home') {
     irPara(0);
-  } else if (e.key >= '1' && e.key <= '9') {
-    irParaEtapa(Number(e.key) - 1);
+  } else if (e.key >= '0' && e.key <= '9') {
+    // 1 a 9 abrem as nove primeiras páginas; 0 abre a décima.
+    irParaEtapa(e.key === '0' ? 9 : Number(e.key) - 1);
   }
 });
 

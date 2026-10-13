@@ -10,7 +10,8 @@ const LOJA = 'audio';
 
 export type AudioSalvo =
   | { tipo: 'arquivo'; blob: Blob }
-  | { tipo: 'pcm'; taxa: number; amostras: Float32Array };
+  | { tipo: 'pcm'; taxa: number; amostras: Float32Array }
+  | { tipo: 'versao'; nome: string; quando: number; projeto: string };
 
 export function carregarProjeto(): Project {
   try {
@@ -49,6 +50,52 @@ export const guardarAudio = (id: string, audio: AudioSalvo) => operar('readwrite
 export const lerAudio = (id: string) => operar<AudioSalvo | undefined>('readonly', (l) => l.get(id));
 export const apagarAudio = (id: string) => operar('readwrite', (l) => l.delete(id));
 export const listarAudios = () => operar<IDBValidKey[]>('readonly', (l) => l.getAllKeys());
+
+// ---------- versões ----------
+// Retratos do projeto guardados no navegador, para voltar a um ponto
+// anterior da música. Guardam o projeto (JSON); o áudio é o mesmo dos takes.
+
+const PREFIXO_DE_VERSAO = 'versao:';
+const MAXIMO_DE_VERSOES = 15;
+
+export interface Versao {
+  chave: string;
+  nome: string;
+  quando: number;
+  projeto: string;
+}
+
+export async function listarVersoes(): Promise<Versao[]> {
+  const versoes: Versao[] = [];
+  for (const chave of await listarAudios()) {
+    if (!String(chave).startsWith(PREFIXO_DE_VERSAO)) continue;
+    const v = await lerAudio(String(chave));
+    if (v?.tipo === 'versao') versoes.push({ chave: String(chave), nome: v.nome, quando: v.quando, projeto: v.projeto });
+  }
+  return versoes.sort((a, b) => b.quando - a.quando);
+}
+
+/** Guarda o estado atual como uma versão; as mais antigas além do limite são apagadas. */
+export async function guardarVersao(p: Project, nome: string) {
+  const quando = Date.now();
+  const projeto = JSON.stringify(p);
+  const versoes = await listarVersoes();
+  if (versoes[0]?.projeto === projeto) return;
+  await guardarAudio(PREFIXO_DE_VERSAO + quando, { tipo: 'versao', nome, quando, projeto });
+  for (const antiga of versoes.slice(MAXIMO_DE_VERSOES - 1)) await apagarAudio(antiga.chave);
+}
+
+export const abrirVersao = (v: Versao) => normalizar(JSON.parse(v.projeto) as Project);
+
+/** Áudio que não pode ser apagado: o do projeto aberto e o de todas as versões guardadas. */
+export async function audiosEmUso(p: Project): Promise<Set<string>> {
+  const usados = new Set(idsDeAudio(p));
+  for (const v of await listarVersoes()) {
+    usados.add(v.chave);
+    for (const audioId of idsDeAudio(abrirVersao(v))) usados.add(audioId);
+  }
+  return usados;
+}
 
 // ---------- arquivo de projeto ----------
 // Um único arquivo .json com o projeto e todo o áudio dentro (em base64),

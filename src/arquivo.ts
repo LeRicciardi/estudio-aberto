@@ -6,7 +6,7 @@ import { avisar } from './moldura.ts';
 import { analisarBeat, carregarDeFabrica } from './paginas/beat.ts';
 import { desenharGravar } from './paginas/gravar.ts';
 import { desenharVozes, reafinarTodos } from './paginas/voz.ts';
-import { apagarAudio, desempacotarProjeto, empacotarProjeto, lerAudio, listarAudios } from './storage.ts';
+import { apagarAudio, audiosEmUso, desempacotarProjeto, empacotarProjeto, lerAudio, listarAudios } from './storage.ts';
 import { desenharTudo, parar } from './transporte.ts';
 import { baixar } from './ui/controles.ts';
 
@@ -59,6 +59,6 @@ export async function restaurarAudio() {
  * A limpeza acontece aqui, ao abrir a página: sai o áudio que nenhum take usa.
  */
 export async function limparAudioSemUso() {
-  const usados = new Set(idsDeAudio(estado.projeto));
+  const usados = await audiosEmUso(estado.projeto);
   for (const chave of await listarAudios()) if (!usados.has(String(chave))) await apagarAudio(String(chave));
 }

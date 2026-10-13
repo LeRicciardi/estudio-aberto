@@ -5,10 +5,11 @@ import { duracaoDoPasso } from './engine/tempo.ts';
 import { CHAVE_DO_MODO, av, engine, estado, gravador, projetoParaTocar, registrar, relogio } from './estado.ts';
 import { GENEROS } from './model/generos.ts';
 import { NOTAS, type Project, STEPS, duracaoDaMusica, padraoNoCompasso } from './model/project.ts';
-import { PAGINAS, PaginaId, barraDeTempo, botaoGravar, botaoTocar, contagemEl, etapaDeBeat, medidor, medidorDeEntrada, paginasVisiveis, rodape, secTransporte, tempo, trilha, visorInfo } from './moldura.ts';
+import { PAGINAS, type PaginaId, barraDeTempo, botaoGravar, botaoTocar, contagemEl, etapaDeBeat, medidor, medidorDeEntrada, paginasVisiveis, rodape, secTransporte, tempo, trilha, visorInfo } from './moldura.ts';
 import { desenharBeat } from './paginas/beat.ts';
 import { desenharEstilo } from './paginas/estilo.ts';
 import { desenharGravar } from './paginas/gravar.ts';
+import { atualizarTeleprompter, desenharLetra, desenharTeleprompter } from './paginas/letra.ts';
 import { desenharMaster } from './paginas/master.ts';
 import { desenharMixer } from './paginas/mixer.ts';
 import { desenharProjeto } from './paginas/projeto.ts';
@@ -166,6 +167,7 @@ export function quadro() {
   barraDeTempo.hidden = loop || !!estado.previa;
   visorInfo.textContent = `${estado.projeto.bpm} BPM · ${NOTAS[estado.projeto.tom]} ${estado.projeto.escala}`;
   estado.agulhas = estado.agulhas.filter((a) => a.isConnected);
+  if (estado.pagina === 'gravar' && !loop) atualizarTeleprompter(pos);
   for (const fn of estado.pagina === 'efeitos' ? estado.quadrosDaVoz : estado.pagina === 'mixer' ? estado.quadrosDoMixer : []) fn();
   for (const a of estado.agulhas) a.style.left = `${Math.min(100, (pos / duracao) * 100)}%`;
 
@@ -197,6 +199,8 @@ export function desenharTudo() {
   desenharTrilha();
   desenharEstilo();
   desenharBeat();
+  desenharLetra();
+  desenharTeleprompter();
   desenharVozes();
   void desenharGravar();
   desenharMaster();

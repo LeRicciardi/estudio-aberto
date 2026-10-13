@@ -162,7 +162,7 @@ export function novoProjeto(genero = 'trap'): Project {
     bpm: 140, swing: 0, tom: 9, escala: 'menor',
     kit: 'trap', instrumento: 'pluck',
     volumes: { bateria: 0.9, baixo: 0.9, melodia: 0.6 },
-    beat: { fonte: 'padrao', volume: 0.8, espaco: true },
+    beat: { fonte: 'padrao', volume: 0.8, espaco: true, cede: 1.5 },
     samples: {},
     padroes: [], arranjo: [], takes: [],
     montagem: { ligada: false, compassos: 2, escolha: [] },
@@ -170,6 +170,7 @@ export function novoProjeto(genero = 'trap'): Project {
     latenciaMs: null,
     master: 'limpo',
     ajusteDoMaster: { graveDb: 0, medioDb: 0, agudoDb: 0, largura: 1, alvoLufs: -14 },
+    letra: { texto: '', compasso: 1 },
   };
   aplicarGenero(p, genero);
   return p;

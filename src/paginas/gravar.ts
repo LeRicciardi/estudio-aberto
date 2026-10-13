@@ -9,6 +9,7 @@ import { avisar, botaoGravar, botaoTocar, contagemEl, medidorDeEntrada, secGrava
 import { guardarAudio } from '../storage.ts';
 import { desenharTransporte, parar, tocar, trocarModo } from '../transporte.ts';
 import { botao, campo, explicacao, h, seletor } from '../ui/controles.ts';
+import { teleprompter } from './letra.ts';
 import { onda } from './onda.ts';
 import { desenharVozes, reafinar } from './voz.ts';
 
@@ -158,6 +159,7 @@ export async function desenharGravar() {
     h('p', { className: 'nota' }, 'Coloque o fone (de preferência com fio), aperte gravar e cante em cima do beat. A gravação começa de onde a música estiver; cada gravação vira um take.'),
     h('div', { className: 'linha palco' }, botaoGravarGrande, contagemEl),
     campo('Nível do microfone', medidorDeEntrada),
+    teleprompter,
     h('div', { className: 'linha' }, h('label', { className: 'caixa' }, contagem, 'Contagem de 4 antes de gravar'), escolha),
     ...lista,
     h('h3', {}, 'Voz fora do tempo?'),

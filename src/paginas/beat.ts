@@ -6,7 +6,7 @@ import { av, engine, estado, id, mudou, relogio } from '../estado.ts';
 import { type Escala, type KitId, LANES, type LaneId, NOTAS, PREFIXO_DE_FABRICA, SAMPLES_DE_FABRICA, STEPS } from '../model/project.ts';
 import { avisar, secCanais } from '../moldura.ts';
 import { guardarAudio } from '../storage.ts';
-import { parar } from '../transporte.ts';
+import { parar, reiniciarSeTocando } from '../transporte.ts';
 import { botao, campo, deslizante, explicacao, h, numero, opcoes, seletor } from '../ui/controles.ts';
 import { desenharArranjo } from './arranjo.ts';
 import { desenharEstilo } from './estilo.ts';
@@ -39,8 +39,17 @@ function desenharCanais() {
   caixaEspaco.onchange = () => {
     beat.espaco = caixaEspaco.checked;
     mudou();
+    reiniciarSeTocando();
   };
-  const espaco = h('label', { className: 'caixa' }, caixaEspaco, 'Abrir espaço no beat para a voz');
+  const espaco = h('div', { className: 'linha' },
+    h('label', { className: 'caixa' }, caixaEspaco, 'O beat abre espaço quando a voz entra'),
+    av(deslizante(`Quanto o beat abaixa com a voz (dB)`, 0, 6, 0.5, beat.cede, (v) => { beat.cede = v; }, reiniciarSeTocando)),
+    explicacao([
+      'Enquanto a voz canta, o beat perde um pouco da faixa de 3 kHz, onde mora a clareza da letra, e abaixa levemente. Quando a voz para, ele volta inteiro.',
+      'É o que engenheiros fazem com compressão e equalização acionadas pela voz. Aqui a curva é calculada a partir da própria gravação.',
+      'De 1 a 2 dB quase não se percebe e já resolve. Mais que 4 dB faz o beat "bombear".',
+    ]),
+  );
 
   if (beat.fonte === 'arquivo') {
     const arquivo = h('input', { type: 'file', accept: 'audio/*' });

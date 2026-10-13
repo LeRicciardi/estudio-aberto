@@ -3,6 +3,7 @@
 // (AudioContext) e para exportar (OfflineAudioContext).
 
 import type { PresetMaster, Project, Take } from '../model/project.ts';
+import { TAXA_DA_CURVA, curvaDeGanho, curvaEmDb } from './espaco.ts';
 import { chaveDaCadeia, criarCadeiaDeVoz, type CadeiaDeVoz } from './vocalChain.ts';
 
 export const PRESETS_MASTER: Record<PresetMaster, { nome: string; cola: [number, number]; ganhoDb: number; teto: number; explicacao: string[] }> = {
@@ -33,6 +34,9 @@ interface Canal {
   chave: string;
 }
 
+/** Como ouvir a saída: normal, somada em mono, ou imitando a caixa de um celular. */
+export type Escuta = 'normal' | 'mono' | 'celular';
+
 /** Nomes dos medidores fixos da mesa; cada take tem também o seu, pelo id. */
 export type CanalFixo = 'bateria' | 'baixo' | 'melodia' | 'beat' | 'master';
 
@@ -44,6 +48,11 @@ export class Mixer {
   readonly saida: GainNode;
   private entradaMaster: GainNode;
   private espacoParaVoz: BiquadFilterNode;
+  private cedeParaVoz: GainNode;
+  /** Último nó antes das caixas de som; a escuta (mono, celular) é montada depois dele. */
+  private paraAsCaixas: GainNode;
+  private nosDaEscuta: AudioNode[] = [];
+  escuta: Escuta = 'normal';
   private canais = new Map<string, Canal>();
   private medidores = new Map<string, AnalyserNode>();
   private amostras = new Float32Array(1024);
@@ -71,13 +80,15 @@ export class Mixer {
     this.entradaMaster.channelCount = 2;
     this.entradaMaster.channelCountMode = 'explicit';
     this.saida = ctx.createGain();
-    // Beats prontos já vêm cheios e comprimidos. Um corte suave em 3 kHz, a
-    // região que carrega a inteligibilidade da letra, abre lugar para a voz.
+    // Beats prontos já vêm cheios e comprimidos. Enquanto a voz canta, o beat
+    // perde um pouco de 3 kHz (a região da inteligibilidade da letra) e cai
+    // um pouco de volume; quando ela para, volta inteiro. Ver `agendarEspaco`.
     this.espacoParaVoz = ctx.createBiquadFilter();
     this.espacoParaVoz.type = 'peaking';
     this.espacoParaVoz.frequency.value = 3000;
     this.espacoParaVoz.Q.value = 1;
-    this.barraDoBeat.connect(this.espacoParaVoz).connect(this.entradaMaster);
+    this.cedeParaVoz = ctx.createGain();
+    this.barraDoBeat.connect(this.espacoParaVoz).connect(this.cedeParaVoz).connect(this.entradaMaster);
 
     const banda = (tipo: BiquadFilterType, hz: number) => {
       const f = ctx.createBiquadFilter();
@@ -110,7 +121,8 @@ export class Mixer {
     this.limitador.attack.value = 0.001;
     this.limitador.release.value = 0.1;
     junta.connect(this.cola).connect(this.ganhoMaster).connect(this.limitador).connect(this.saida);
-    this.saida.connect(ctx.destination);
+    this.paraAsCaixas = ctx.createGain();
+    this.saida.connect(this.paraAsCaixas).connect(ctx.destination);
 
     this.medir('bateria', this.barraBateria);
     this.medir('baixo', this.barraBaixo);
@@ -142,10 +154,60 @@ export class Mixer {
     return this.canais.get(takeId)?.cadeia.compressor.reduction ?? 0;
   }
 
+  /**
+   * Agenda o beat para ceder espaço à voz. `presenca` diz, ponto a ponto, o
+   * quanto há de voz (0 a 1) desde o começo da música; null desliga.
+   */
+  agendarEspaco(presenca: Float32Array | null, p: Project, t0: number, desde: number) {
+    const corte = this.espacoParaVoz.gain;
+    const volume = this.cedeParaVoz.gain;
+    corte.cancelScheduledValues(0);
+    volume.cancelScheduledValues(0);
+    const trecho = presenca?.subarray(Math.min(presenca.length, Math.floor(desde * TAXA_DA_CURVA)));
+    if (!trecho || trecho.length < 2 || !p.beat.espaco) {
+      corte.setValueAtTime(0, 0);
+      volume.setValueAtTime(1, 0);
+      return;
+    }
+    const duracao = trecho.length / TAXA_DA_CURVA;
+    corte.setValueCurveAtTime(curvaEmDb(trecho, 4), t0, duracao);
+    volume.setValueCurveAtTime(curvaDeGanho(trecho, p.beat.cede), t0, duracao);
+  }
+
+  /** Troca o jeito de ouvir a saída. Não muda a música nem a exportação. */
+  definirEscuta(modo: Escuta) {
+    this.escuta = modo;
+    this.paraAsCaixas.disconnect();
+    this.nosDaEscuta.forEach((n) => n.disconnect());
+    this.nosDaEscuta = [];
+    if (modo === 'normal') {
+      this.paraAsCaixas.connect(this.ctx.destination);
+      return;
+    }
+    // Um nó de um canal só soma esquerda e direita: é o que uma caixa mono toca.
+    const soma = this.ctx.createGain();
+    soma.channelCount = 1;
+    soma.channelCountMode = 'explicit';
+    let fim: AudioNode = soma;
+    this.nosDaEscuta.push(soma);
+    if (modo === 'celular') {
+      // Caixa de celular não reproduz grave nem o topo dos agudos.
+      for (const [tipo, hz] of [['highpass', 350], ['highpass', 350], ['lowpass', 6000]] as const) {
+        const f = this.ctx.createBiquadFilter();
+        f.type = tipo;
+        f.frequency.value = hz;
+        fim.connect(f);
+        fim = f;
+        this.nosDaEscuta.push(f);
+      }
+    }
+    this.paraAsCaixas.connect(soma);
+    fim.connect(this.ctx.destination);
+  }
+
   /** Deixa a mesa igual ao projeto: cria/remove canais e ajusta os controles. */
   sincronizar(p: Project) {
     this.barraDoBeat.gain.value = p.beat.volume;
-    this.espacoParaVoz.gain.value = p.beat.espaco && p.takes.length > 0 ? -3 : 0;
     this.barraBateria.gain.value = p.volumes.bateria;
     this.barraBaixo.gain.value = p.volumes.baixo;
     this.barraMelodia.gain.value = p.volumes.melodia;
