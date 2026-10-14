@@ -283,7 +283,7 @@ export function desenharVozes() {
       ...PRESETS_VOZ[take.preset].explicacao,
       'Afinação: "Leve" só aproxima das notas certas; "Forte" corrige tudo sem soar artificial; "Robô" é o efeito marcante do trap e do plug.',
       'Perto ↔ longe controla o reverb, que simula um ambiente. Seca ↔ com eco controla o delay, que repete a voz no tempo do beat.',
-      'Em "Mostrar tudo" cada ferramenta tem a sua tela: equalizador, compressor, limpeza de ruído, edição do take e mais.',
+      'No modo Estúdio (botão "Guiado" no topo) cada ferramenta tem a sua tela: equalizador, compressor, limpeza de ruído, edição do take e mais.',
     ])),
 
     // Tela completa: uma tela por ferramenta.

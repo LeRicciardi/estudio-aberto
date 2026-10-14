@@ -20,6 +20,8 @@ export const ATALHOS: [string, string][] = [
 ];
 
 window.addEventListener('keydown', (e) => {
+  // Com a tela de início aberta, as teclas são dela.
+  if (document.querySelector('.inicio-fundo')) return;
   // Enquanto a pessoa digita em um campo, as teclas são do campo.
   const alvo = e.target as HTMLElement;
   const digitando = alvo.tagName === 'SELECT' || alvo.tagName === 'TEXTAREA'
@@ -61,7 +63,9 @@ window.addEventListener('keyup', (e) => {
 });
 
 // Arrastar um arquivo para a janela: áudio vira o beat, .json abre o projeto.
+// Só arquivos de fora: arrastar um som do navegador para a bateria é outra coisa.
 window.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
   document.body.classList.add('soltando');
 });
@@ -69,6 +73,7 @@ window.addEventListener('dragover', (e) => {
 window.addEventListener('dragleave', () => document.body.classList.remove('soltando'));
 
 window.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
   document.body.classList.remove('soltando');
   const arquivo = e.dataTransfer?.files[0];

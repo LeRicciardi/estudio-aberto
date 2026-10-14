@@ -20,16 +20,19 @@ export function cartaoDeGenero(g: string): HTMLElement {
       botao(estado.previa === g ? '■ Parar' : '▶ Ouvir', () => void ouvirGenero(g)),
       atual
         ? h('span', { className: 'nota' }, 'Em uso')
-        : botao('Usar este', () => {
-            if (!confirm(`Usar ${m.nome}? O beat atual é substituído pelo modelo do estilo (dá para desfazer). As vozes ficam.`)) return;
-            parar();
-            aplicarGenero(estado.projeto, g);
-            estado.padraoAtual = 0;
-            mudou();
-            desenharTudo();
-          }, 'principal'),
+        : botao('Usar este', () => usarGenero(g), 'principal'),
     ),
   );
+}
+
+/** Troca o beat pelo modelo do estilo, mantendo as vozes. */
+export function usarGenero(g: string) {
+  if (!confirm(`Usar ${GENEROS[g].nome}? O beat atual é substituído pelo modelo do estilo (dá para desfazer). As vozes ficam.`)) return;
+  parar();
+  aplicarGenero(estado.projeto, g);
+  estado.padraoAtual = 0;
+  mudou();
+  desenharTudo();
 }
 
 /** Pré-escuta: toca o modelo do estilo sem mexer na música da pessoa. */

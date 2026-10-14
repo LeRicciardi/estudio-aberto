@@ -5,6 +5,7 @@ import { estado, mudou } from '../estado.ts';
 import { LANES, LINHAS, STEPS, nomeDoGrau, padraoVazio, passosDoPadrao } from '../model/project.ts';
 import { reiniciarSeTocando } from '../transporte.ts';
 import { botao, h } from '../ui/controles.ts';
+import { aceitarSom } from '../ui/navegador.ts';
 import { desenharBeat } from './beat.ts';
 
 /** Células das grades agrupadas por passo, para acender a coluna que está tocando. */
@@ -56,7 +57,9 @@ export function gradeDeBateria(): HTMLElement {
   const passos = passosDoPadrao(padrao);
   dimensionar(grade, passos);
   for (const lane of LANES) {
-    grade.append(h('span', { className: 'nome-linha' }, lane.nome));
+    const rotulo = h('span', { className: 'nome-linha', title: estado.projeto.samples[lane.id] ? `${lane.nome}: ${estado.projeto.samples[lane.id]!.nome}` : `${lane.nome}: arraste um som do navegador até aqui` }, lane.nome);
+    aceitarSom(rotulo, lane.id);
+    grade.append(rotulo);
     for (let i = 0; i < passos; i++) {
       const b = h('button', { ariaLabel: `${lane.nome}, passo ${i + 1}` });
       const pintar = () => {

@@ -48,7 +48,9 @@ export const secLancar = pagina_('lancar');
 
 export const secProjeto = pagina_('projeto');
 
-export const trilha = h('nav', { className: 'trilha', ariaLabel: 'Páginas' });
+export const trilha = h('nav', { className: 'trilha', ariaLabel: 'Janelas' });
+
+export const navegador = h('aside', { className: 'navegador', ariaLabel: 'Navegador de sons e do projeto' });
 
 export const rodape = so(h('div', { className: 'linha rodape' }));
 
@@ -58,19 +60,20 @@ export const medidorDeEntrada = h('div', { className: 'medidor' }, h('div'));
 
 // Cada página é uma parte do trabalho, na ordem em que a música nasce.
 // A tela simples mostra só as marcadas com `simples`.
+// `grupo` junta as janelas por etapa na barra; `icone` é o desenho do botão.
 export const PAGINAS = [
-  { id: 'estilo', nome: 'Estilo', secao: secEstilo, simples: true },
-  { id: 'canais', nome: 'Beat', secao: secCanais, simples: true },
-  { id: 'notas', nome: 'Notas', secao: secNotas, simples: false },
-  { id: 'sons', nome: 'Sons', secao: secSons, simples: true },
-  { id: 'arranjo', nome: 'Arranjo', secao: secArranjo, simples: false },
-  { id: 'letra', nome: 'Letra', secao: secLetra, simples: true },
-  { id: 'gravar', nome: 'Gravar', secao: secGravar, simples: true },
-  { id: 'efeitos', nome: 'Voz', secao: secVozes, simples: true },
-  { id: 'mixer', nome: 'Mixer', secao: secMixer, simples: false },
-  { id: 'master', nome: 'Master', secao: secMaster, simples: true },
-  { id: 'lancar', nome: 'Lançar', secao: secLancar, simples: true },
-  { id: 'projeto', nome: 'Projeto', secao: secProjeto, simples: true },
+  { id: 'estilo', nome: 'Estilo', secao: secEstilo, simples: true, grupo: 'Beat', icone: '✦' },
+  { id: 'canais', nome: 'Beat', secao: secCanais, simples: true, grupo: 'Beat', icone: '▦' },
+  { id: 'notas', nome: 'Notas', secao: secNotas, simples: false, grupo: 'Beat', icone: '♫' },
+  { id: 'sons', nome: 'Sons', secao: secSons, simples: true, grupo: 'Beat', icone: '◫' },
+  { id: 'arranjo', nome: 'Arranjo', secao: secArranjo, simples: false, grupo: 'Música', icone: '☰' },
+  { id: 'letra', nome: 'Letra', secao: secLetra, simples: true, grupo: 'Música', icone: '✎' },
+  { id: 'gravar', nome: 'Gravar', secao: secGravar, simples: true, grupo: 'Voz', icone: '●' },
+  { id: 'efeitos', nome: 'Voz', secao: secVozes, simples: true, grupo: 'Voz', icone: '◎' },
+  { id: 'mixer', nome: 'Mixer', secao: secMixer, simples: false, grupo: 'Final', icone: '⫼' },
+  { id: 'master', nome: 'Master', secao: secMaster, simples: true, grupo: 'Final', icone: '◉' },
+  { id: 'lancar', nome: 'Lançar', secao: secLancar, simples: true, grupo: 'Final', icone: '⇪' },
+  { id: 'projeto', nome: 'Projeto', secao: secProjeto, simples: true, grupo: 'Projeto', icone: '▣' },
 ] as const;
 
 export type PaginaId = (typeof PAGINAS)[number]['id'];
@@ -86,6 +89,30 @@ export function etapaDeBeat() {
   return estado.pagina === 'estilo' || estado.pagina === 'canais' || estado.pagina === 'notas' || estado.pagina === 'sons';
 }
 
-app.append(secTransporte, trilha, aviso, h('main', {}, ...PAGINAS.map((p) => p.secao)), rodape);
+app.append(secTransporte, trilha, navegador, h('main', {}, ...PAGINAS.map((p) => p.secao)), rodape);
 
-export const avisar = (texto: string) => (aviso.textContent = texto);
+const CHAVE_DO_NAVEGADOR = 'estudio-aberto:navegador';
+document.body.classList.toggle('sem-navegador', localStorage.getItem(CHAVE_DO_NAVEGADOR) === 'fechado');
+const telaEstreita = window.matchMedia('(max-width: 999px)');
+
+/** No computador o navegador fica ao lado e a escolha é lembrada; na tela estreita ele abre por cima. */
+export function alternarNavegador() {
+  if (telaEstreita.matches) {
+    document.body.classList.toggle('navegador-aberto');
+    return;
+  }
+  const fechado = document.body.classList.toggle('sem-navegador');
+  localStorage.setItem(CHAVE_DO_NAVEGADOR, fechado ? 'fechado' : 'aberto');
+}
+
+// Na tela estreita, tocar fora do navegador ou escolher uma janela fecha ele.
+document.addEventListener('pointerdown', (e) => {
+  if (!document.body.classList.contains('navegador-aberto')) return;
+  const alvo = e.target as HTMLElement;
+  if (!navegador.contains(alvo) && !alvo.closest('button[aria-label="Navegador"]')) document.body.classList.remove('navegador-aberto');
+});
+
+export const avisar = (texto: string) => {
+  aviso.textContent = texto;
+  aviso.title = texto;
+};

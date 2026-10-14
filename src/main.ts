@@ -7,10 +7,12 @@ import { avisar } from './moldura.ts';
 import { recuperarGravacao } from './paginas/gravar.ts';
 import { guardarVersao } from './storage.ts';
 import { desenharTudo, quadro } from './transporte.ts';
+import { inicioAoAbrir } from './ui/inicio.ts';
 import './atalhos.ts';
 import './paginas/projeto.ts';
 
 desenharTudo();
+inicioAoAbrir();
 
 engine.mixer.sincronizar(estado.projeto);
 

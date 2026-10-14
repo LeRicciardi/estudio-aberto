@@ -124,7 +124,7 @@ function desenharCanais() {
 
   secCanais.replaceChildren(
     h('h2', {}, 'Beat'), abas,
-    h('p', { className: 'nota so-simples' }, 'O beat do estilo já vem pronto: aperte Tocar. Clique nos quadrados para mudar a bateria. Em "Mostrar tudo" ficam o 808, a melodia, os samples e o arranjo.'),
+    h('p', { className: 'nota so-simples' }, 'O beat do estilo já vem pronto: aperte Tocar. Clique nos quadrados para mudar a bateria. No modo Estúdio (botão "Guiado" no topo) ficam o 808, a melodia, os samples e o arranjo.'),
     av(h('h3', {}, 'Padrão')),
     av(abasDePadrao()),
     av(h('div', { className: 'linha' }, campo('Nome do padrão', nomeDoPadrao), apagar)),

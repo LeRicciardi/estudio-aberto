@@ -4,17 +4,18 @@ import { type SomDaBiblioteca, apagarSons, blobDoSom, carregarDaBiblioteca, muda
 import { zip } from '../engine/entrega.ts';
 import { deMidi } from '../engine/midi-arquivo.ts';
 import { TIPOS_DE_SOM, type TipoDeSom, notaDoNome } from '../engine/pacotes.ts';
-import { estado, mudou } from '../estado.ts';
-import { LANES, type LaneId, redimensionar } from '../model/project.ts';
+import { engine, estado, mudou } from '../estado.ts';
+import { LANES, type LaneId, PREFIXO_DE_FABRICA, redimensionar } from '../model/project.ts';
 import { avisar, secSons } from '../moldura.ts';
 import { audiosEmUso } from '../storage.ts';
 import { baixar, botao, campo, explicacao, h, opcoes } from '../ui/controles.ts';
-import { desenharBeat } from './beat.ts';
+import { carregarDeFabrica, desenharBeat } from './beat.ts';
 
-type Destino = LaneId | '808';
+export type Destino = LaneId | '808';
 
-async function usar(som: SomDaBiblioteca, onde: Destino) {
-  const buffer = await carregarDaBiblioteca(som.id);
+/** Coloca um som (da biblioteca ou dos que vêm com o estúdio) na bateria ou no 808 da música aberta. */
+export async function usarSom(som: { id: string; nome: string }, onde: Destino) {
+  const buffer = som.id.startsWith(PREFIXO_DE_FABRICA) ? ((await carregarDeFabrica(som.id)) ? engine.buffers.get(som.id) : undefined) : await carregarDaBiblioteca(som.id);
   if (!buffer) return avisar('Não consegui ler esse som.');
   if (buffer.duration > 10) return avisar('Esse som é longo demais para a bateria ou o 808 (máximo de 10 segundos).');
   if (onde === '808') estado.projeto.sample808 = { audioId: som.id, nome: som.nome, nota: notaDoNome(som.nome) ?? 0 };
@@ -54,7 +55,7 @@ function linhaDoSom(som: SomDaBiblioteca): HTMLElement {
   const onde = h('select', { ariaLabel: `Usar ${som.nome} em` }, h('option', { value: '' }, 'Usar em...'));
   for (const [v, nome] of destinos) onde.append(h('option', { value: v }, nome));
   onde.onchange = () => {
-    if (onde.value) void usar(som, onde.value as Destino);
+    if (onde.value) void usarSom(som, onde.value as Destino);
     onde.value = '';
   };
   return h('div', { className: 'linha' },

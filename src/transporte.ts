@@ -5,7 +5,7 @@ import { duracaoDoPasso } from './engine/tempo.ts';
 import { CHAVE_DO_MODO, av, engine, estado, gravador, projetoParaTocar, registrar, relogio } from './estado.ts';
 import { GENEROS } from './model/generos.ts';
 import { NOTAS, type Project, duracaoDaMusica, localizarPasso, passosDoPadrao } from './model/project.ts';
-import { PAGINAS, type PaginaId, barraDeTempo, botaoGravar, botaoTocar, contagemEl, etapaDeBeat, medidor, medidorDeEntrada, paginasVisiveis, rodape, secTransporte, tempo, trilha, visorInfo } from './moldura.ts';
+import { PAGINAS, type PaginaId, alternarNavegador, aviso, barraDeTempo, botaoGravar, botaoTocar, contagemEl, etapaDeBeat, medidor, medidorDeEntrada, paginasVisiveis, rodape, secTransporte, tempo, trilha, visorInfo } from './moldura.ts';
 import { desenharBeat } from './paginas/beat.ts';
 import { desenharEstilo } from './paginas/estilo.ts';
 import { desenharGravar } from './paginas/gravar.ts';
@@ -18,6 +18,8 @@ import { desenharSons } from './paginas/sons.ts';
 import { desenharVozes, reafinarTodos } from './paginas/voz.ts';
 import { salvarProjeto } from './storage.ts';
 import { botao, h } from './ui/controles.ts';
+import { abrirInicio } from './ui/inicio.ts';
+import { desenharNavegador } from './ui/navegador.ts';
 
 export function navegarHistorico(passos: number) {
   registrar();
@@ -34,7 +36,12 @@ export function navegarHistorico(passos: number) {
 }
 
 export function trocarTela() {
-  estado.telaSimples = !estado.telaSimples;
+  definirTela(!estado.telaSimples);
+}
+
+/** Guiado (passo a passo, só o essencial) ou estúdio completo. */
+export function definirTela(simples: boolean) {
+  estado.telaSimples = simples;
   localStorage.setItem(CHAVE_DO_MODO, estado.telaSimples ? 'simples' : 'completa');
   document.body.classList.toggle('simples', estado.telaSimples);
   if (engine.tocando && !estado.gravando) parar();
@@ -45,6 +52,7 @@ export function irParaPagina(destino: PaginaId) {
   if (engine.tocando && !estado.gravando && estado.telaSimples) parar();
   estado.pagina = paginasVisiveis().some((p) => p.id === destino) ? destino : 'estilo';
   sessionStorage.setItem('estudio-aberto:pagina', estado.pagina);
+  document.body.classList.remove('navegador-aberto');
   if (estado.telaSimples) estado.modo = etapaDeBeat() ? 'padrao' : 'musica';
   // Estas páginas mostram valores que podem ter mudado em outra página.
   if (estado.pagina === 'mixer') desenharMixer();
@@ -64,7 +72,24 @@ export function irParaEtapa(i: number) {
 export function desenharTrilha() {
   const visiveis = paginasVisiveis();
   for (const p of PAGINAS) p.secao.classList.toggle('ativa', p.id === estado.pagina);
-  trilha.replaceChildren(...visiveis.map((p, i) => Object.assign(botao(p.nome, () => irParaPagina(p.id), p.id === estado.pagina ? 'ativo' : ''), { title: `Página ${i + 1}` })));
+  const botaoDa = (p: (typeof visiveis)[number], i: number) => Object.assign(
+    botao('', () => irParaPagina(p.id), p.id === estado.pagina ? 'ativo' : ''),
+    { title: `${p.nome} (tecla ${i === 9 ? 0 : i + 1})` },
+  );
+  const comIcone = (p: (typeof visiveis)[number], i: number) => {
+    const b = botaoDa(p, i);
+    b.append(h('i', {}, estado.telaSimples ? String(i + 1) : p.icone), p.nome);
+    return b;
+  };
+  // Guiado: uma fila numerada de etapas. Completo: janelas agrupadas por etapa.
+  const grupos = [...new Set(visiveis.map((p) => p.grupo))];
+  trilha.replaceChildren(
+    ...(estado.telaSimples
+      ? [h('div', { className: 'grupo-de-janelas' }, ...visiveis.map(comIcone))]
+      : grupos.map((g) => Object.assign(h('div', { className: 'grupo-de-janelas', role: 'group' }, ...visiveis.map((p, i) => [p, i] as const).filter(([p]) => p.grupo === g).map(([p, i]) => comIcone(p, i))), { ariaLabel: g }))),
+    aviso,
+  );
+  desenharNavegador();
   const atual = visiveis.findIndex((p) => p.id === estado.pagina);
   const voltar = botao('← Voltar', () => irParaEtapa(atual - 1));
   voltar.disabled = atual <= 0;
@@ -78,6 +103,8 @@ export function desenharTransporte() {
     Object.assign(botao('MÚSICA', () => trocarModo('musica'), estado.modo === 'musica' ? 'ativo' : ''), { title: 'Tocar a música inteira, com as vozes' }),
   );
   secTransporte.replaceChildren(
+    Object.assign(botao('⌂', abrirInicio, 'icone'), { title: 'Início: começar um beat, gravar em cima de um beat ou abrir um projeto', ariaLabel: 'Início' }),
+    Object.assign(botao('☰', alternarNavegador, 'icone'), { title: 'Mostrar ou esconder o navegador de sons', ariaLabel: 'Navegador' }),
     h('strong', { className: 'marca' }, 'Estúdio Aberto'),
     h('div', { className: 'grupo' }, botaoTocar, botaoGravar),
     av(modos),
@@ -87,7 +114,7 @@ export function desenharTransporte() {
     h('div', { className: 'grupo' },
       Object.assign(botao('↶', () => navegarHistorico(-1)), { title: 'Desfazer (Ctrl/⌘+Z)', ariaLabel: 'Desfazer' }),
       Object.assign(botao('↷', () => navegarHistorico(1)), { title: 'Refazer (Ctrl/⌘+Shift+Z)', ariaLabel: 'Refazer' }),
-      botao(estado.telaSimples ? 'Mostrar tudo' : 'Tela simples', trocarTela, estado.telaSimples ? '' : 'ativo'),
+      Object.assign(botao(estado.telaSimples ? 'Guiado' : 'Estúdio', trocarTela, 'modo-tela'), { title: estado.telaSimples ? 'Modo guiado: só o essencial, passo a passo. Clique para o estúdio completo.' : 'Estúdio completo: todas as janelas. Clique para o modo guiado.' }),
     ),
   );
 }

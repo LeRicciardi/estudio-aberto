@@ -98,13 +98,18 @@ let previa: AudioBufferSourceNode | undefined;
 export async function ouvirSom(somId: string): Promise<boolean> {
   const buffer = await carregarDaBiblioteca(somId);
   if (!buffer) return false;
+  tocarPrevia(buffer);
+  return true;
+}
+
+/** Toca um som solto, fora da música (prévia no navegador e na biblioteca). */
+export function tocarPrevia(buffer: AudioBuffer) {
   void engine.ctx.resume();
   previa?.stop();
   previa = engine.ctx.createBufferSource();
   previa.buffer = buffer;
   previa.connect(engine.ctx.destination);
   previa.start();
-  return true;
 }
 
 export async function blobDoSom(somId: string): Promise<Blob | undefined> {

@@ -42,6 +42,7 @@ body.simples main { max-width: 920px; }
 .marca { font-size: 15px; letter-spacing: 0.02em; color: var(--destaque); margin-right: 4px; }
 .grupo { display: flex; gap: 6px; align-items: center; }
 .visor {
+  flex: none;
   display: flex; flex-direction: column; justify-content: center;
   min-width: 150px; padding: 4px 12px;
   background: #0f1417; border: 1px solid #000; border-radius: 4px;
@@ -234,7 +235,8 @@ body.soltando::after { content: 'Solte o arquivo: áudio vira o beat, .estudio.j
 
 @media (max-width: 640px) {
   .marca { display: none; }
-  .visor { min-width: 0; flex: 1; }
+  .visor { min-width: 0; flex: 1 1 130px; }
+  .visor .tempo, .visor .visor-info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .transporte > .medidor { display: none; }
   .giratorio { width: 72px; }
 }
@@ -333,3 +335,99 @@ textarea { width: 100%; font: inherit; line-height: 1.7; color: var(--texto); ba
 .tecla:active { transform: translateY(3px); box-shadow: none; }
 
 .curva.automacao { cursor: crosshair; margin-top: 4px; }
+
+/* ======================================================================
+   Moldura de estação de trabalho: barra de ferramentas no topo, janelas
+   agrupadas por etapa, navegador à esquerda e a janela aberta no centro.
+   ====================================================================== */
+
+button.icone { padding: 4px 9px; font-size: 16px; line-height: 1; }
+button.modo-tela { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; }
+
+/* Barra de janelas: grupos com legenda, botões com desenho e nome. */
+.trilha { align-items: flex-end; gap: 10px; padding: 6px 12px 0; border-bottom: 1px solid #111; background: #21272d; }
+.grupo-de-janelas { display: flex; gap: 2px; position: relative; padding-top: 12px; }
+.grupo-de-janelas[aria-label]::before {
+  content: attr(aria-label); position: absolute; top: 0; left: 2px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6d7884;
+}
+.trilha button { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 5px 5px 0 0; }
+.trilha button i { font-style: normal; font-size: 13px; color: var(--destaque); min-width: 1em; text-align: center; }
+body.simples .trilha button i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--fosso); font-size: 11px; font-weight: 700; }
+.trilha button.ativo i { color: #1d1300; }
+body.simples .trilha button.ativo i { color: var(--destaque); background: #1d1300; }
+.trilha .aviso { flex: 1 1 200px; align-self: center; margin: 0 0 0 auto; padding: 0 6px; max-width: none; min-height: 0; font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Navegador */
+.navegador { display: none; background: #1f252a; border-right: 1px solid #111; font-size: 13px; overflow: auto; }
+.navegador-titulo { position: sticky; top: 0; z-index: 1; padding: 7px 10px; background: linear-gradient(#36404a, #2b333b); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--suave); border-bottom: 1px solid #111; }
+.navegador .pasta { border-bottom: 1px solid #262d33; }
+.navegador .pasta > summary { padding: 6px 10px; cursor: pointer; color: #c9d1d9; font-weight: 600; list-style: none; }
+.navegador .pasta > summary::before { content: '▸'; display: inline-block; width: 14px; color: var(--destaque); }
+.navegador .pasta[open] > summary::before { content: '▾'; }
+.navegador .pasta .pasta { border: 0; margin-left: 10px; }
+.navegador .pasta .pasta > summary { font-weight: 500; color: var(--suave); padding: 3px 10px; }
+.navegador .item { display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 26px; cursor: pointer; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; }
+.navegador .item span { overflow: hidden; text-overflow: ellipsis; }
+.navegador .item i { font-style: normal; color: #7d8793; font-size: 11px; width: 12px; text-align: center; flex: none; }
+.navegador .item:hover, .navegador .item:focus-visible { background: #2c353d; outline: none; }
+.navegador .item.atual { color: var(--destaque); }
+.navegador .item[draggable='true'] { cursor: grab; }
+.nome-linha.alvo { outline: 2px dashed var(--destaque); outline-offset: -2px; color: var(--destaque); }
+
+/* Título de cada janela, como a barra de uma janela de plugin. */
+.pagina > h2:first-child {
+  margin: -14px -14px 14px; padding: 7px 14px;
+  background: linear-gradient(#3b4651, #2d363f); border-bottom: 1px solid #111; border-radius: 6px 6px 0 0;
+  font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #d5dbe1;
+}
+
+/* No computador: tudo cabe na janela, sem a página inteira rolar. */
+@media (min-width: 1000px) {
+  body { height: 100vh; overflow: hidden; }
+  #app {
+    display: grid; height: 100vh; min-height: 0;
+    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: 'topo topo' 'janelas janelas' 'nav main' 'nav rodape';
+  }
+  body.sem-navegador #app { grid-template-columns: 0 minmax(0, 1fr); }
+  .transporte { grid-area: topo; position: static; }
+  .trilha { grid-area: janelas; }
+  .navegador { grid-area: nav; display: block; }
+  body.sem-navegador .navegador { display: none; }
+  main { grid-area: main; overflow: auto; max-width: none; padding: 10px 14px; }
+  body.simples main { max-width: none; }
+  body.simples main > .pagina { max-width: 980px; margin-left: auto; margin-right: auto; }
+  .rodape { grid-area: rodape; margin: 0; padding: 8px 14px; background: #21272d; border-top: 1px solid #111; justify-content: space-between; }
+  .pagina { margin: 0; }
+}
+
+/* No celular e na tela estreita: o navegador abre por cima, pelo botão ☰. */
+@media (max-width: 999px) {
+  body.navegador-aberto .navegador { display: block; position: fixed; inset: 0 auto 0 0; z-index: 20; width: min(300px, 85vw); box-shadow: 4px 0 18px rgba(0, 0, 0, 0.6); }
+  .trilha .aviso { flex-basis: 100%; text-align: left; padding: 4px 2px 6px; white-space: normal; }
+}
+
+/* ---------- tela de início ---------- */
+.inicio-fundo { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(8, 10, 12, 0.78); backdrop-filter: blur(3px); overflow: auto; }
+.inicio { width: min(1040px, 100%); background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); overflow: hidden; }
+.inicio > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 22px; background: linear-gradient(#3a444e, #2c353d); border-bottom: 1px solid #111; }
+.inicio h1 { margin: 0; font-size: 22px; color: var(--destaque); letter-spacing: 0.01em; }
+.inicio header p { margin: 4px 0 0; color: var(--suave); }
+.caminhos { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 14px; padding: 18px 22px; }
+.caminho { display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--fosso); border: 1px solid var(--borda); border-radius: 8px; }
+.caminho > i { font-style: normal; font-size: 26px; color: var(--destaque); line-height: 1; }
+.caminho > strong { font-size: 17px; }
+.caminho > p { margin: 0 0 4px; color: var(--suave); }
+.caminho > button, .caminho .linha { margin-top: auto; }
+.generos { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.generos button, .inicio footer button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; text-align: left; white-space: normal; }
+.generos button:hover, .generos button:focus-visible { border-color: var(--destaque); }
+.generos small, .inicio footer small { color: var(--suave); font-size: 11px; }
+.inicio footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--borda); }
+.inicio footer .nota { margin: 0 6px 0 0; }
+.inicio footer button.ativo { border-color: var(--destaque); box-shadow: inset 0 0 0 1px var(--destaque); }
+@media (max-width: 820px) {
+  .caminhos { grid-template-columns: 1fr; }
+}

@@ -31,7 +31,12 @@ Gera o build e publica no GitHub Pages (ramo `gh-pages`).
 
 ## O que já existe
 
-A tela é organizada como uma estação de trabalho: barra de transporte no topo (tocar, gravar, visor de tempo, BPM e tom, medidor) e uma página para cada parte do trabalho.
+Ao abrir, a tela de início oferece três caminhos: fazer um beat (escolhendo o estilo), gravar em cima de um beat pronto, ou abrir e continuar um projeto. Ali também se escolhe o modo:
+
+- **Guiado:** só o essencial, uma etapa numerada por vez, com "Avançar".
+- **Estúdio:** todas as janelas, agrupadas por etapa (Beat, Música, Voz, Final, Projeto) numa barra abaixo do transporte, e o **navegador** à esquerda com estilos, sons do estúdio, a biblioteca da pessoa, padrões e vozes. Um clique ouve, dois cliques usam, e dá para arrastar um som até uma linha da bateria.
+
+No computador, tudo cabe na janela: só a janela aberta rola. No celular, o navegador abre por cima pelo botão ☰ e o botão ⌂ volta ao início.
 
 | Página | O que faz |
 |---|---|
